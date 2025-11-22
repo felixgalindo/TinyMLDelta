@@ -3,6 +3,8 @@
 /**
  * @file tinymldelta.h
  * @brief TinyMLDelta — Public C API for applying patches.
+ * @author Felix Galindo
+ * @license Apache-2.0
  */
 
 #include <stddef.h>

@@ -3,6 +3,8 @@
 /**
  * @file tinymldelta_config.h
  * @brief TinyMLDelta — Global build configuration and feature flags.
+ * @author Felix Galindo
+ * @license Apache-2.0
  */
 
 #include <stdint.h>
