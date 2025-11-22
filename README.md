@@ -25,13 +25,11 @@ TinyMLDelta performs **safe, atomic, guardrail-checked updates** on extremely lo
 - Crash-safe journaling
 
 ## Planned
-
-- ONNX model frontend
 - Edge Impulse frontend
 - SHA-256 and AES-CMAC signatures
 - Model versioning
 - Vendor metadata
-- MCU integrations (Zephyr, Arduino UNO R4 WiFi, XBee LR, ConnectCore, Tachyon)
+- MCU integrations (Zephyr, Arduino UNO R4 WiFi, Tachyon)
 
 ## High-Level Design
 
@@ -291,7 +289,7 @@ Contributions welcome:
 
 - New front-ends (ONNX, Edge Impulse)
 - Optimized diff algorithms
-- MCU HAL ports (Zephyr, Arduino, STM32, ESP32, XBee LR)
+- MCU HAL ports (Zephyr, Arduino, STM32, ESP32, XBee)
 - Metadata TLV extensions
 - Docs improvements
 - Security signing pipeline
