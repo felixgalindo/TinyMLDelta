@@ -1,0 +1,107 @@
+# -------------------------------
+# OS / Editor Junk
+# -------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+
+# VSCode
+.vscode/
+
+# CLion / JetBrains
+.idea/
+
+# -------------------------------
+# Python Artifacts
+# -------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+
+# Virtualenvs
+.venv/
+env/
+tinyenv/
+.tinyenv/
+
+# Build system cache
+pip-wheel-metadata/
+wheels/
+*.egg-info/
+*.eggs/
+
+# -------------------------------
+# ML-Generated Files
+# -------------------------------
+# TFLite models produced by examples/modelgen
+examples/modelgen/base.tflite
+examples/modelgen/target.tflite
+
+# Generated TinyMLDelta patch files
+*.tmd
+
+# TensorFlow SavedModel staging dirs
+saved_model/
+*/saved_model/
+*.pb
+
+# -------------------------------
+# C / C++ Build Artifacts
+# -------------------------------
+# Object files
+*.o
+*.obj
+
+# Dependency files
+*.d
+
+# Static and shared libs
+*.a
+*.so
+*.dylib
+
+# Binaries & demo executables
+demo_apply
+patch_applier
+*/demo_apply
+*/patch_applier
+
+# Build folders
+build/
+*/build/
+target/
+out/
+*.map
+
+# -------------------------------
+# Flash / Emulated Storage
+# -------------------------------
+examples/posix/flash.bin
+examples/posix/*.img
+examples/posix/*.bin
+
+# -------------------------------
+# Logs and Dumps
+# -------------------------------
+*.log
+*.trace
+*.gcda
+*.gcno
+
+# -------------------------------
+# Packaging / zips
+# -------------------------------
+*.zip
+*.tar.gz
+dist/
+release/
+
+# -------------------------------
+# Docker
+# -------------------------------
+docker-data/
+*.lock
