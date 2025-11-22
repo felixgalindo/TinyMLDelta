@@ -3,6 +3,8 @@
 /**
  * @file tinymldelta_ports.h
  * @brief TinyMLDelta — Platform abstraction (flash, digests, slots, journal, log).
+ * @author Felix Galindo
+ * @license Apache-2.0
  */
 
 #include <stddef.h>

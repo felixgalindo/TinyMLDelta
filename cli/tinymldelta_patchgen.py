@@ -1,139 +1,103 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""TinyMLDelta — Weight-Aware Patch Generator (TFLite first).
-
-Generates binary patches **only for model weights**, ignoring:
-  - FlatBuffer metadata drift
-  - padding/alignment changes
-  - converter-version differences
-  - reordered operator tables
-  - added/removed optional metadata blocks
-
-Output:
-  [header] [TLVs...] [chunk headers + data...]
 """
+@file tinymldelta_patchgen.py
+@brief TinyMLDelta — TFLite-first patch generator with optional metadata TLVs.
+@author Felix Galindo
+@license Apache-2.0
+
+This tool computes a compact binary patch between a "base" and "target"
+TFLite model (or any pair of binary blobs) and emits a TinyMLDelta patch
+file with the following on-the-wire format:
+
+  [header] [TLVs...] [chunk headers + data...]
+
+Where:
+
+  - The header (tmd_hdr_t) encodes version, digest algorithm, model lengths,
+    and digests of base/target.
+
+  - The optional TLV metadata block can include:
+        * required tensor arena bytes
+        * required TFLM ABI/schema version
+        * opset hash
+        * I/O hash
+
+  - Each chunk describes a byte run to overwrite at a given offset, with
+    optional RLE compression and per-chunk CRC32.
+
+Usage (basic):
+    python3 tinymldelta_patchgen.py base.tflite target.tflite patch.tmd
+
+Usage (with auto-metadata from target TFLite):
+    python3 tinymldelta_patchgen.py base.tflite target.tflite patch.tmd \\
+        --auto-meta --arena-factor 1.4
+
+Manual metadata overrides (take precedence over auto-meta):
+    --req-arena BYTES
+    --tflm-abi VERSION
+    --opset-hash 0x1234abcd
+    --io-hash 0xdeadbeef
+"""
+
 import argparse
 import struct
 import zlib
-from typing import Optional, List, Tuple
+from typing import Optional
 
-import tflite  # FlatBuffer schema
-from tinymldelta_meta_compute import compute_from_tflite
+# Try to import optional TFLite-aware metadata helper.
+# If not available, we degrade gracefully and skip auto-meta.
+try:
+    from tinymldelta_meta_compute import compute_from_tflite  # type: ignore
+except Exception:
+    compute_from_tflite = None  # type: ignore
 
-HDR_FMT   = "<BBHII32s32sHH"
+# --------------------------------------------------------------------------- #
+#                           Wire-format constants                             #
+# --------------------------------------------------------------------------- #
+
+#: Patch header layout (see tmd_hdr_t in C runtime; little-endian).
+HDR_FMT = "<BBHII32s32sHH"
+
+#: Chunk header layout (see tmd_chunk_hdr_t in C runtime; little-endian).
 CHUNK_FMT = "<IHBb"  # off,len,enc,has_crc
 
-ALGO_NONE  = 0
+# Digest algorithms (must match runtime enum)
+ALGO_NONE = 0
 ALGO_CRC32 = 1
 
+# Chunk encoding types (must match runtime enum)
 ENC_RAW = 0
 ENC_RLE = 1  # [count][byte], count 0 => 256
 
+# Metadata TLV tags (must match tinymldelta_internal.h)
 TMD_META_REQ_ARENA_BYTES = 0x01
-TMD_META_TFLM_ABI        = 0x02
-TMD_META_OPSET_HASH      = 0x03
-TMD_META_IO_HASH         = 0x04
+TMD_META_TFLM_ABI = 0x02
+TMD_META_OPSET_HASH = 0x03
+TMD_META_IO_HASH = 0x04
 
 
-# ---------------------------------------------------------------------------
-# 🔍 WEIGHT-AWARE LOGIC
-# ---------------------------------------------------------------------------
-
-def tflite_weight_ranges(model_buf: bytes) -> List[Tuple[int, int]]:
-    """Extract byte ranges corresponding to constant tensors (weights)."""
-    model = tflite.Model.Model.GetRootAsModel(model_buf, 0)
-    sg = model.Subgraphs(0)
-
-    buffers = model.BuffersLength()
-    ranges = []
-
-    # Iterate all tensors
-    for t_idx in range(sg.TensorsLength()):
-        tensor = sg.Tensors(t_idx)
-        buf_idx = tensor.Buffer()
-        if buf_idx < 0:
-            continue
-        buf = model.Buffers(buf_idx)
-        data = buf.DataAsNumpy()
-        if data is None or len(data) == 0:
-            continue  # skip non-constant tensors
-
-        # FlatBuffer stores data inline; grab offset
-        data_vec = buf._tab.Offset(4)
-        if data_vec == 0:
-            continue
-
-        abs_off = buf._tab.Vector(data_vec)
-        size = len(data)
-
-        ranges.append((abs_off, abs_off + size))
-
-    # Merge overlapping / adjacent ranges
-    if not ranges:
-        return []
-
-    ranges.sort()
-    merged = [ranges[0]]
-    for start, end in ranges[1:]:
-        last_s, last_e = merged[-1]
-        if start <= last_e:
-            merged[-1] = (last_s, max(last_e, end))
-        else:
-            merged.append((start, end))
-
-    return merged
-
-
-def find_weight_diffs(base: bytes, target: bytes, weight_ranges: List[Tuple[int,int]],
-                      merge_gap: int, min_chunk: int):
-    """Diff only inside weight ranges."""
-    all_diffs = []
-
-    for (ws, we) in weight_ranges:
-        bs = max(0, ws)
-        be = min(len(base), we)
-        ts = max(0, ws)
-        te = min(len(target), we)
-
-        if bs >= be or ts >= te:
-            continue
-
-        segment_diffs = find_diffs(
-            base[bs:be],
-            target[ts:te],
-            merge_gap=merge_gap
-        )
-
-        # The returned offsets are relative to the segment; adjust them
-        for off, data in segment_diffs:
-            all_diffs.append((ws + off, data))
-
-    # Now coalesce small diffs globally
-    if not all_diffs:
-        return []
-
-    all_diffs.sort()
-    coalesced = []
-    for off, data in all_diffs:
-        if coalesced:
-            p_off, p_data = coalesced[-1]
-            p_end = p_off + len(p_data)
-
-            if len(data) < min_chunk and off <= p_end + merge_gap:
-                gap = target[p_end:off]
-                coalesced[-1] = (p_off, p_data + gap + data)
-                continue
-
-        coalesced.append((off, data))
-
-    return coalesced
-
-
-# ---------------------------------------------------------------------------
-# Existing helper functions (unchanged)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
+#                          RLE compression helpers                            #
+# --------------------------------------------------------------------------- #
 
 def rle_encode(data: bytes) -> bytes:
+    """Encode a byte string using a simple RLE scheme.
+
+    The format is a sequence of (count, value) pairs:
+        [count][byte]
+
+    Where:
+        - count is in [1..255] encoded as uint8
+        - count==0 means 256 (so we can represent runs up to 256 bytes)
+
+    Args:
+        data: Input bytes to encode.
+
+    Returns:
+        RLE-encoded bytes. May be longer than the input; the caller is
+        responsible for choosing between raw vs RLE.
+    """
     out = bytearray()
     i = 0
     n = len(data)
@@ -149,7 +113,26 @@ def rle_encode(data: bytes) -> bytes:
     return bytes(out)
 
 
+# --------------------------------------------------------------------------- #
+#                          Diff / coalescing helpers                          #
+# --------------------------------------------------------------------------- #
+
 def find_diffs(base: bytes, target: bytes, merge_gap: int = 16):
+    """Identify byte ranges where target differs from base.
+
+    The algorithm scans both byte arrays and collects runs where
+    base[i:i+len] != target[i:i+len]. Adjacent runs that are close
+    (within merge_gap) are merged to reduce chunk count.
+
+    Args:
+        base:   Original byte array.
+        target: Desired byte array.
+        merge_gap: If two diff runs are separated by <= merge_gap bytes,
+                   merge them into a single chunk.
+
+    Returns:
+        List of (offset, bytes) pairs describing the new data to write.
+    """
     diffs = []
     i = 0
     n = min(len(base), len(target))
@@ -162,17 +145,21 @@ def find_diffs(base: bytes, target: bytes, merge_gap: int = 16):
             diffs.append([start, bytearray(target[start:i])])
         else:
             i += 1
+
+    # If target is longer, append the tail as a diff.
     if len(target) > n:
         diffs.append([n, bytearray(target[n:])])
 
     if not diffs:
         return []
 
+    # Merge nearby diffs to reduce record count.
     merged = [diffs[0]]
     for off, data in diffs[1:]:
         prev_off, prev_data = merged[-1]
         prev_end = prev_off + len(prev_data)
         if off - prev_end <= merge_gap:
+            # Fill any gap then append the new data.
             merged[-1][1].extend(target[prev_end:off])
             merged[-1][1].extend(data)
         else:
@@ -180,115 +167,279 @@ def find_diffs(base: bytes, target: bytes, merge_gap: int = 16):
     return [(off, bytes(data)) for off, data in merged]
 
 
+# --------------------------------------------------------------------------- #
+#                             Metadata (TLV)                                  #
+# --------------------------------------------------------------------------- #
+
 def tlv(tag: int, payload: bytes) -> bytes:
+    """Build a single TLV record.
+
+    Layout:
+        [tag: u8][len: u8][value: len bytes]
+
+    Args:
+        tag:     TLV tag (0..255).
+        payload: Value bytes; must be <=255 bytes long.
+
+    Returns:
+        Encoded TLV record.
+
+    Raises:
+        ValueError: If payload is too large (>255 bytes).
+    """
     if len(payload) > 255:
-        raise ValueError("TLV payload too large")
+        raise ValueError("TLV payload too large (>255 bytes)")
     return struct.pack("<BB", tag & 0xFF, len(payload)) + payload
 
 
-# ---------------------------------------------------------------------------
-# MAIN
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
+#                         Debug / header inspection                           #
+# --------------------------------------------------------------------------- #
 
-def main():
-    ap = argparse.ArgumentParser(description="TinyMLDelta weight-aware patch generator.")
-    ap.add_argument("base", help="base .tflite path")
-    ap.add_argument("target", help="target .tflite path")
+def debug_print_patch_header(path: str) -> None:
+    """Read and pretty-print the TinyMLDelta patch header.
+
+    This is intended for debugging from the CLI and from the POSIX demo
+    (via run_demo.sh / verify_flash.py).
+
+    Args:
+        path: Path to the .tmd patch file.
+    """
+    try:
+        with open(path, "rb") as f:
+            hdr_bytes = f.read(struct.calcsize(HDR_FMT))
+    except OSError as e:
+        print(f"[TinyMLDelta] Failed to open patch for header debug: {path} ({e})")
+        return
+
+    if len(hdr_bytes) < struct.calcsize(HDR_FMT):
+        print(f"[TinyMLDelta] Patch too small to contain header: {path}")
+        return
+
+    v, algo, chunks_n, base_len, target_len, base_chk, tgt_chk, meta_len, flags = \
+        struct.unpack(HDR_FMT, hdr_bytes)
+
+    # Print a short hex dump of the first 16 bytes
+    first16 = " ".join(f"{b:02x}" for b in hdr_bytes[:16])
+
+    print("[TinyMLDelta] Patch header debug:")
+    print(f"  file       : {path}")
+    print(f"  first16    : {first16}")
+    print(f"  v          : {v}")
+    print(f"  algo       : {algo}  (0=NONE, 1=CRC32)")
+    print(f"  chunks_n   : {chunks_n}")
+    print(f"  base_len   : {base_len}")
+    print(f"  target_len : {target_len}")
+    print(f"  meta_len   : {meta_len}")
+    print(f"  flags      : 0x{flags:04x}")
+
+
+# --------------------------------------------------------------------------- #
+#                              Main entry point                               #
+# --------------------------------------------------------------------------- #
+
+def main() -> None:
+    """CLI entry point for TinyMLDelta patch generator.
+
+    It:
+      1) Reads the base and target model bytes.
+      2) Computes byte-level diffs (and merges nearby runs).
+      3) Optionally derives TFLite metadata (arena, ABI, opset, I/O hash).
+      4) Applies manual metadata overrides, if provided.
+      5) Encodes everything into the TinyMLDelta patch wire format.
+    """
+    ap = argparse.ArgumentParser(
+        description="TinyMLDelta patch generator (TFLite-first)."
+    )
+    ap.add_argument("base", help="base .tflite path (or any binary)")
+    ap.add_argument("target", help="target .tflite path (or any binary)")
     ap.add_argument("out", help="output patch file path")
+    ap.add_argument(
+        "--algo",
+        choices=["none", "crc32"],
+        default="crc32",
+        help="header digest mode (default: crc32)",
+    )
+    ap.add_argument(
+        "--merge-gap",
+        type=int,
+        default=16,
+        help="merge diffs closer than this many bytes",
+    )
+    ap.add_argument(
+        "--min-chunk",
+        type=int,
+        default=8,
+        help="coalesce tiny diffs into their predecessor if nearby",
+    )
 
-    ap.add_argument("--algo", choices=["none","crc32"], default="crc32")
-    ap.add_argument("--merge-gap", type=int, default=16)
-    ap.add_argument("--min-chunk", type=int, default=8)
+    # Auto metadata from the target TFLite model
+    ap.add_argument(
+        "--auto-meta",
+        action="store_true",
+        help="derive TLVs from target .tflite using tinymldelta_meta_compute.py",
+    )
+    ap.add_argument(
+        "--arena-factor",
+        type=float,
+        default=1.4,
+        help="heuristic multiplier for arena estimate; 0=disable",
+    )
 
-    ap.add_argument("--auto-meta", action="store_true")
-    ap.add_argument("--arena-factor", type=float, default=1.4)
-
-    ap.add_argument("--req-arena", type=int, default=None)
-    ap.add_argument("--tflm-abi", type=int, default=None)
-    ap.add_argument("--opset-hash", type=lambda x:int(x,0), default=None)
-    ap.add_argument("--io-hash", type=lambda x:int(x,0), default=None)
+    # Manual overrides (take precedence over auto-meta)
+    ap.add_argument(
+        "--req-arena",
+        type=int,
+        default=None,
+        help="required tensor arena bytes for target model (u32)",
+    )
+    ap.add_argument(
+        "--tflm-abi",
+        type=int,
+        default=None,
+        help="required TFLM ABI/schema version (u16)",
+    )
+    ap.add_argument(
+        "--opset-hash",
+        type=lambda x: int(x, 0),
+        default=None,
+        help="required opset hash (u32, e.g. 0x1234abcd)",
+    )
+    ap.add_argument(
+        "--io-hash",
+        type=lambda x: int(x, 0),
+        default=None,
+        help="I/O shape/type hash (u32)",
+    )
 
     args = ap.parse_args()
 
-    base = open(args.base, "rb").read()
-    target = open(args.target, "rb").read()
+    # 1) Load models
+    with open(args.base, "rb") as f:
+        base = f.read()
+    with open(args.target, "rb") as f:
+        target = f.read()
 
-    # ------------ WEIGHT RANGES ------------
-    weight_ranges = tflite_weight_ranges(target)
-    print(f"[TMD] Weight regions: {weight_ranges}")
+    # 2) Compute raw diffs
+    diffs = find_diffs(base, target, merge_gap=args.merge_gap)
 
-    # ------------ WEIGHT-AWARE DIFF ------------
-    diffs = find_weight_diffs(
-        base, target,
-        weight_ranges,
-        merge_gap=args.merge_gap,
-        min_chunk=args.min_chunk
-    )
+    # 3) Coalesce very small diffs into their predecessor if close enough
+    coalesced = []
+    for off, data in diffs:
+        if (
+            coalesced
+            and (len(data) < args.min_chunk)
+            and (off <= coalesced[-1][0] + len(coalesced[-1][1]) + args.merge_gap)
+        ):
+            prev_off, prev_data = coalesced[-1]
+            gap = target[prev_off + len(prev_data):off]
+            coalesced[-1] = (prev_off, prev_data + gap + data)
+        else:
+            coalesced.append((off, data))
+    diffs = coalesced
 
-    # ------------ integrity digests ------------
+    # 4) Header digests
     if args.algo == "crc32":
-        base_chk = struct.pack("<I", zlib.crc32(base) & 0xFFFFFFFF) + b"\x00"*28
-        tgt_chk  = struct.pack("<I", zlib.crc32(target) & 0xFFFFFFFF) + b"\x00"*28
+        base_chk = struct.pack("<I", zlib.crc32(base) & 0xFFFFFFFF) + b"\x00" * 28
+        tgt_chk = struct.pack("<I", zlib.crc32(target) & 0xFFFFFFFF) + b"\x00" * 28
         algo = ALGO_CRC32
         chunk_has_crc = 1
     else:
-        base_chk = b"\x00"*32
-        tgt_chk  = b"\x00"*32
+        base_chk = b"\x00" * 32
+        tgt_chk = b"\x00" * 32
         algo = ALGO_NONE
         chunk_has_crc = 0
 
-    # ------------ metadata TLVs ------------
+    # 5) Auto metadata (TFLite-aware), if requested
     auto_req_arena = auto_abi = auto_opset = auto_io = None
     if args.auto_meta:
-        try:
-            auto_abi, auto_opset, auto_io, auto_req_arena = compute_from_tflite(
-                args.target,
-                None if args.arena_factor <= 0 else float(args.arena_factor)
-            )
-        except Exception as e:
-            print(f"[TinyMLDelta] Auto-metadata unavailable: {e}")
+        if compute_from_tflite is None:
+            print("[TinyMLDelta] Warning: auto-meta requested but "
+                  "tinymldelta_meta_compute.compute_from_tflite() is unavailable.")
+        else:
+            try:
+                auto_abi, auto_opset, auto_io, auto_req_arena = compute_from_tflite(
+                    args.target,
+                    None
+                    if args.arena_factor is None or args.arena_factor <= 0
+                    else float(args.arena_factor),
+                )
+            except Exception as e:
+                print(f"[TinyMLDelta] Auto-metadata unavailable: {e}")
+                auto_req_arena = auto_abi = auto_opset = auto_io = None
 
+    # 6) Manual overrides take precedence over auto-meta
     req_arena = args.req_arena if args.req_arena is not None else (auto_req_arena or 0)
-    tflm_abi  = args.tflm_abi  if args.tflm_abi  is not None else (auto_abi or 0)
-    opset     = args.opset_hash if args.opset_hash is not None else (auto_opset or 0)
-    io_hash   = args.io_hash   if args.io_hash   is not None else (auto_io or 0)
+    tflm_abi = args.tflm_abi if args.tflm_abi is not None else (auto_abi or 0)
+    opset = args.opset_hash if args.opset_hash is not None else (auto_opset or 0)
+    io_hash = args.io_hash if args.io_hash is not None else (auto_io or 0)
 
+    # 7) Build metadata TLVs
     meta = bytearray()
-    if req_arena: meta += tlv(TMD_META_REQ_ARENA_BYTES, struct.pack("<I", req_arena))
-    if tflm_abi: meta += tlv(TMD_META_TFLM_ABI, struct.pack("<H", tflm_abi))
-    if opset: meta += tlv(TMD_META_OPSET_HASH, struct.pack("<I", opset))
-    if io_hash: meta += tlv(TMD_META_IO_HASH, struct.pack("<I", io_hash))
+    if req_arena and req_arena > 0:
+        meta += tlv(TMD_META_REQ_ARENA_BYTES, struct.pack("<I", int(req_arena)))
+    if tflm_abi and tflm_abi > 0:
+        meta += tlv(TMD_META_TFLM_ABI, struct.pack("<H", int(tflm_abi & 0xFFFF)))
+    if opset and opset > 0:
+        meta += tlv(TMD_META_OPSET_HASH, struct.pack("<I", int(opset & 0xFFFFFFFF)))
+    if io_hash and io_hash > 0:
+        meta += tlv(TMD_META_IO_HASH, struct.pack("<I", int(io_hash & 0xFFFFFFFF)))
 
-    # ------------ encode chunks ------------
+    v = 1
+    meta_len = len(meta)
+    flags = 0
+
+    # 8) Encode chunks with optional RLE
     chunks = []
     for off, raw in diffs:
         rle = rle_encode(raw)
         if len(rle) < len(raw):
-            chunks.append((off, ENC_RLE, rle))
+            enc = ENC_RLE
+            data = rle
         else:
-            chunks.append((off, ENC_RAW, raw))
+            enc = ENC_RAW
+            data = raw
+        chunks.append((off, enc, data))
 
-    # ------------ write patch file ------------
+    # 9) Write final patch
     with open(args.out, "wb") as out:
         hdr = struct.pack(
-            HDR_FMT, 1, algo, len(chunks),
-            len(base), len(target),
-            base_chk, tgt_chk, len(meta), 0
+            HDR_FMT,
+            v,
+            algo,
+            len(chunks),
+            len(base),
+            len(target),
+            base_chk,
+            tgt_chk,
+            meta_len,
+            flags,
         )
         out.write(hdr)
-        if meta:
+        if meta_len:
             out.write(meta)
-
         for off, enc, data in chunks:
-            ch = struct.pack(CHUNK_FMT, off, len(data), enc, chunk_has_crc)
-            out.write(ch)
+            chdr = struct.pack(CHUNK_FMT, off, len(data), enc, chunk_has_crc)
+            out.write(chdr)
             if chunk_has_crc:
                 out.write(struct.pack("<I", zlib.crc32(data) & 0xFFFFFFFF))
             out.write(data)
 
-    print(f"TinyMLDelta WEIGHT-AWARE patch written: {args.out}")
-    print(f"Chunks: {len(chunks)}   Encoded bytes: {sum(len(c[2]) for c in chunks)}")
-    print(f"Metadata bytes: {len(meta)}")
+    print(f"TinyMLDelta patch written: {args.out}")
+    print(
+        f"Chunks: {len(chunks)}  "
+        f"Encoded bytes: {sum(len(d) for _, _, d in chunks)}  "
+        f"Meta: {meta_len} bytes"
+    )
+
+    # 10) Debug header dump (so you can see what runtime will parse)
+    debug_print_patch_header(args.out)
+
+    if args.auto_meta:
+        print(
+            f"Auto-meta (resolved): req_arena={req_arena} bytes, "
+            f"tflm_abi={tflm_abi}, opset_hash=0x{opset:08x}, io_hash=0x{io_hash:08x}"
+        )
 
 
 if __name__ == "__main__":

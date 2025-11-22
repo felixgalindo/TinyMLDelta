@@ -3,6 +3,8 @@
 /**
  * @file tinymldelta_internal.h
  * @brief TinyMLDelta — Wire format with metadata TLVs and chunk records.
+ * @author Felix Galindo
+ * @license Apache-2.0
  */
 
 #include <stdint.h>
