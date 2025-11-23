@@ -16,9 +16,8 @@
 
 set -euo pipefail
 
-# Resolve repo root based on this script location
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${SCRIPT_DIR}"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 echo "[run_demo] Repo root       = ${REPO_ROOT}"
 
