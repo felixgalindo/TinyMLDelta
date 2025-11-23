@@ -254,7 +254,7 @@ TinyMLDelta/
 │   │   └── (base.tflite, target.tflite are generated artifacts)
 │   │
 │   └── posix/
-│       ├── README.md              # Notes on model generation / usage
+│       ├── README.md              # Notes on running demo
 │       ├── Makefile               # Builds demo_apply using POSIX ports + core
 │       ├── run_demo.sh            # End-to-end demo: generate models → patch → apply → verify
 │       ├── make_flash.py          # Creates flash.bin with A/B slots + journal region
