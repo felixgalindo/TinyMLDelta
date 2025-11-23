@@ -208,7 +208,7 @@ verification.
 A **full standalone walkthrough** (with complete logs, explanations, and
 verification steps) is here:
 
-👉 **`examples/posix/Quickstart.md`**
+👉 **`examples/posix/README.md`**
 
 To run the demo:
 
@@ -254,6 +254,7 @@ TinyMLDelta/
 │   │   └── (base.tflite, target.tflite are generated artifacts)
 │   │
 │   └── posix/
+│       ├── README.md              # Notes on model generation / usage
 │       ├── Makefile               # Builds demo_apply using POSIX ports + core
 │       ├── run_demo.sh            # End-to-end demo: generate models → patch → apply → verify
 │       ├── make_flash.py          # Creates flash.bin with A/B slots + journal region

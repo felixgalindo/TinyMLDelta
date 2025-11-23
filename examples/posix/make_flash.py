@@ -4,7 +4,7 @@
 #
 # Create a simulated NOR flash image for TinyMLDelta POSIX demo.
 #
-# Author: Felix Galindo (felixgalindo.com)
+# Author: Felix Galindo 
 # -----------------------------------------------------------------------------
 """
 Creates a simulated flash image with:
