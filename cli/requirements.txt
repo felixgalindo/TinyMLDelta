@@ -1,2 +1,2 @@
-flatbuffers
-tflite-support
+# CLI + model generation dependencies 
+tensorflow
