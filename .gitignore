@@ -105,3 +105,13 @@ release/
 # -------------------------------
 docker-data/
 *.lock
+
+# POSIX demo runtime artifacts
+examples/posix/active_slot.txt
+examples/posix/--size
+
+# UnoQ demo generated artifacts
+examples/UnoQ_TinyMLDeltaDemo/training_data.csv
+examples/UnoQ_TinyMLDeltaDemo/base.tflite
+examples/UnoQ_TinyMLDeltaDemo/target.tflite
+examples/UnoQ_EI_TinyMLDeltaDemo/training_data.csv

@@ -65,7 +65,7 @@ TinyMLDelta is early but rapidly growing. You can contribute to:
 
 ### 🔧 Core Features & Algorithms
 - Improved diff algorithms  
-- Signed patch support (SHA-256, AES-CMAC, COSE)  
+- Signed patch support (SHA-256, AES-CMAC)  
 - Metadata TLV extensions  
 - Reduced RAM footprint  
 - Extended journaling  
