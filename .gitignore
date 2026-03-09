@@ -10,6 +10,9 @@ Thumbs.db
 # VSCode
 .vscode/
 
+# Claude Code
+.claude/
+
 # CLion / JetBrains
 .idea/
 

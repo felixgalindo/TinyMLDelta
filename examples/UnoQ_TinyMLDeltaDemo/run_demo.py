@@ -1,25 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-run_demo.py — Interactive end-to-end TinyMLDelta demo runner.
+run_demo.py — End-to-end TinyMLDelta demo runner for the Arduino UNO Q.
 
-Walks through the full demo in order:
-  1. Detect the Arduino UNO Q serial port.
-  2. Training mode  — send 't', capture CSV, save training_data.csv.
-  3. Model + patch  — run make_model.py to produce patch.tmd.
-  4. Update mode    — send patch to device via Monitor serial link.
-  5. Inference mode — stream live readings; watch for anomalies.
+Steps (fully automated):
+  1. Training  — sends 't' via FIFO, waits for 200 samples, pulls CSV via ADB
+  2. Model     — runs make_model.py on PC to train autoencoder + generate patch
+  3. Update    — ADB-pushes base model + patch, sends 'u' via FIFO to apply
+  4. Inference — sends 'i' via FIFO, streams live anomaly readings from log
 
-The Monitor channel on the UNO Q is routed through the board's Linux
-co-processor (USB CDC gadget → socat → router RPC → STM32). The baud
-rate you set doesn't affect throughput; pyserial opens the port at
-whatever rate is specified and the USB framing handles the rest.
+All application logic (training, inference, patch apply) runs in demo_app
+(C++ binary) on the UNO Q Linux co-processor.  The STM32 sketch is a thin
+sensor proxy that reads the HS3003 temperature sensor.
+
+Commands are sent via a named FIFO on the board:
+  /home/arduino/tinymldelta/cmd.fifo
+
+Training data is saved to:
+  /home/arduino/tinymldelta/training_data.csv
 
 Usage:
-  python3 run_demo.py [--port /dev/cu.usbmodem…] [--baud 115200]
+  python3 run_demo.py [--skip-training] [--skip-model]
 
-Requirements:
-  pip install tensorflow numpy pyserial
+Prerequisites (handled by setup.sh):
+  - demo_app deployed to board  (./linux/deploy_service.sh)
+  - Sketch uploaded              (./setup.sh)
+  - HS3003 sensor on Qwiic cable
+  - ADB accessible
 
 Author:  Felix Galindo
 License: Apache-2.0
@@ -28,18 +35,48 @@ License: Apache-2.0
 from __future__ import annotations
 
 import argparse
-import glob
 import os
-import struct
 import subprocess
 import sys
-import time
 import textwrap
+import time
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-HR = "─" * 60
+SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+REMOTE_DIR  = "/home/arduino/tinymldelta"
+CMD_FIFO    = f"{REMOTE_DIR}/cmd.fifo"
+REMOTE_CSV  = f"{REMOTE_DIR}/training_data.csv"
+REMOTE_LOG  = f"{REMOTE_DIR}/demo_app.log"
+HR          = "─" * 60
+
+# ADB path — matches arduino-cli tools install location
+ADB_DEFAULT = os.path.expanduser(
+    "~/Library/Arduino15/packages/arduino/tools/adb/32.0.0/adb"
+)
+
+
+def find_adb() -> str:
+    """Find ADB binary."""
+    if os.path.isfile(ADB_DEFAULT) and os.access(ADB_DEFAULT, os.X_OK):
+        return ADB_DEFAULT
+    # Try PATH
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        p = os.path.join(d, "adb")
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    sys.exit("ADB not found. Install via arduino-cli or add to PATH.")
+
+
+def adb_cmd(adb: str, shell_cmd: str, check: bool = True) -> str:
+    """Run an ADB shell command and return stdout."""
+    result = subprocess.run(
+        [adb, "shell", shell_cmd],
+        capture_output=True, text=True,
+    )
+    if check and result.returncode != 0:
+        sys.exit(f"ADB command failed: {shell_cmd}\n{result.stderr}")
+    return result.stdout.strip()
 
 
 def hr(title: str = "") -> None:
@@ -50,120 +87,83 @@ def hr(title: str = "") -> None:
         print(HR)
 
 
-def info(msg: str) -> None:  print(f"  {msg}")
-def ok(msg: str)   -> None:  print(f"  ✓ {msg}")
-def warn(msg: str) -> None:  print(f"  ⚠ {msg}")
-def ask(prompt: str) -> str: return input(f"\n  {prompt} ").strip()
+def info(msg: str) -> None: print(f"  {msg}")
+def ok(msg: str)   -> None: print(f"  [OK] {msg}")
+def warn(msg: str) -> None: print(f"  [!!] {msg}")
 
 
-def require_serial():
-    try:
-        import serial
-        return serial
-    except ImportError:
-        sys.exit("pyserial not found. Run:  pip install pyserial")
+# ── Step 1: Training ────────────────────────────────────────────────────────
+
+CSV_FILE   = os.path.join(SCRIPT_DIR, "training_data.csv")
+MAX_WAIT_S = 150  # max seconds to wait for training to complete
 
 
-# ── Port detection ────────────────────────────────────────────────────────────
-
-def detect_port() -> str | None:
-    """Return the most likely UNO Q serial port, or None."""
-    candidates: list[str] = []
-    # macOS
-    candidates += glob.glob("/dev/cu.usbmodem*")
-    # Linux
-    candidates += glob.glob("/dev/ttyACM*")
-    # Windows
-    candidates += glob.glob("COM[0-9]*")
-    return candidates[0] if candidates else None
-
-
-# ── Step 1: Training ──────────────────────────────────────────────────────────
-
-CSV_BEGIN = "--- CSV BEGIN ---"
-CSV_END   = "--- CSV END ---"
-CSV_FILE  = os.path.join(SCRIPT_DIR, "training_data.csv")
-
-
-def run_training(port: str, baud: int) -> str:
-    """
-    Send 't' to the device, capture the CSV block, return CSV text.
-    Saves the CSV to training_data.csv automatically.
-    """
-    serial = require_serial()
-
+def run_training(adb: str) -> str:
+    """Send 't' via FIFO, wait for 200 samples, pull CSV via ADB."""
     hr("STEP 1 — Training")
-    info("Opening serial port ...")
-    try:
-        ser = serial.Serial(port, baud, timeout=2)
-    except serial.SerialException as e:
-        sys.exit(f"Cannot open port: {e}\n"
-                 "  Hint: close the Arduino IDE Serial Monitor first.")
 
-    time.sleep(1)
-    ser.reset_input_buffer()
+    # Check demo_app is running
+    out = adb_cmd(adb, "pgrep -x demo_app", check=False)
+    if not out:
+        sys.exit("demo_app is not running. Deploy with: ./linux/deploy_service.sh")
 
-    info("Sending 't' to enter Training mode ...")
-    ser.write(b"t\n")
-    ser.flush()
+    info("Sending 't' → collecting 200 samples (~100 s) ...")
+    adb_cmd(adb, f"echo t > {CMD_FIFO}")
+    print()
 
-    info("Collecting 200 samples (~100 s). Please wait ...\n")
+    start = time.time()
+    last_status = start
+    while time.time() - start < MAX_WAIT_S:
+        time.sleep(5)
 
-    csv_lines: list[str] = []
-    capturing = False
-    last_progress = time.time()
-    deadline = time.time() + 180  # 3-minute hard timeout
+        # Check if CSV file exists and has 201 lines (header + 200 samples)
+        line_count = adb_cmd(adb, f"wc -l < {REMOTE_CSV} 2>/dev/null || echo 0", check=False)
+        try:
+            n = int(line_count.strip())
+        except ValueError:
+            n = 0
 
-    while time.time() < deadline:
-        raw = ser.readline()
-        if not raw:
-            continue
-        line = raw.decode(errors="replace").rstrip()
-
-        if CSV_BEGIN in line:
-            capturing = True
-            continue
-        if CSV_END in line:
+        if n >= 201:
             break
-        if capturing:
-            csv_lines.append(line)
-        else:
-            # Print progress lines so the user sees something happening
-            if "[TRAIN]" in line and time.time() - last_progress > 2:
-                print(f"    {line}")
-                last_progress = time.time()
 
-    ser.close()
+        if time.time() - last_status > 15:
+            info(f"  {max(0, n - 1)}/200 samples collected ...")
+            last_status = time.time()
+    else:
+        warn("Training timed out. Check demo_app logs.")
 
-    if not csv_lines:
-        sys.exit("No CSV data received. Is the sketch running and the sensor connected?")
+    # Pull CSV
+    info("Pulling training_data.csv from board ...")
+    result = subprocess.run(
+        [adb, "pull", REMOTE_CSV, CSV_FILE],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        sys.exit(f"Failed to pull CSV: {result.stderr}")
 
-    # First line should be 'temp_c' header; strip any extras
-    csv_text = "\n".join(csv_lines) + "\n"
-
-    with open(CSV_FILE, "w") as f:
-        f.write(csv_text)
-
-    sample_count = sum(1 for l in csv_lines if l and l[0].isdigit())
-    ok(f"Captured {sample_count} samples → {CSV_FILE}")
+    # Count samples
+    with open(CSV_FILE) as f:
+        lines = [l for l in f if l.strip() and l[0].isdigit()]
+    ok(f"Captured {len(lines)} samples → training_data.csv")
     return CSV_FILE
 
 
 # ── Step 2: Model + patch generation ─────────────────────────────────────────
 
 PATCH_FILE  = os.path.join(SCRIPT_DIR, "patch.tmd")
+BASE_FILE   = os.path.join(SCRIPT_DIR, "base.tflite")
+CONFIG_FILE = os.path.join(SCRIPT_DIR, "model_config.json")
 MAKE_MODEL  = os.path.join(SCRIPT_DIR, "make_model.py")
 
 
 def run_model_generation(csv_path: str) -> str:
-    """Train autoencoder and generate patch.tmd. Returns patch path."""
+    """Train autoencoder on PC and generate patch.tmd."""
     hr("STEP 2 — Model & patch generation")
-    info(f"Running make_model.py with {csv_path} ...")
+    info("Running make_model.py ...")
     print()
 
     result = subprocess.run(
-        [sys.executable, MAKE_MODEL, "--csv", csv_path,
-         "--out-dir", SCRIPT_DIR],
+        [sys.executable, MAKE_MODEL, csv_path, "--out-dir", SCRIPT_DIR],
         cwd=SCRIPT_DIR,
     )
     if result.returncode != 0:
@@ -172,194 +172,144 @@ def run_model_generation(csv_path: str) -> str:
     if not os.path.exists(PATCH_FILE):
         sys.exit(f"Expected patch file not found: {PATCH_FILE}")
 
-    patch_size = os.path.getsize(PATCH_FILE)
-    ok(f"patch.tmd generated  ({patch_size} bytes)")
+    ok(f"patch.tmd generated  ({os.path.getsize(PATCH_FILE)} bytes)")
     return PATCH_FILE
 
 
-# ── Step 3: Update mode ───────────────────────────────────────────────────────
+# ── Step 3: OTA update ──────────────────────────────────────────────────────
 
-def run_update(port: str, baud: int, patch_path: str) -> None:
-    """Send the patch to the device in Update mode."""
-    serial = require_serial()
-
+def run_update(adb: str, patch_path: str) -> None:
+    """ADB-push base model + patch, then send 'u' via FIFO to apply."""
     hr("STEP 3 — OTA update")
 
-    with open(patch_path, "rb") as f:
-        patch_data = f.read()
+    # Push base model
+    if os.path.exists(BASE_FILE):
+        info(f"Pushing base model ({os.path.getsize(BASE_FILE)} B) ...")
+        subprocess.run([adb, "push", BASE_FILE, f"{REMOTE_DIR}/model.tflite"],
+                       capture_output=True, check=True)
 
-    info(f"Opening serial port {port} ...")
-    try:
-        ser = serial.Serial(port, baud, timeout=2)
-    except serial.SerialException as e:
-        sys.exit(f"Cannot open port: {e}")
+    # Push normalization config (z-score mean/std from training)
+    if os.path.exists(CONFIG_FILE):
+        info(f"Pushing model_config.json ...")
+        subprocess.run([adb, "push", CONFIG_FILE, f"{REMOTE_DIR}/model_config.json"],
+                       capture_output=True, check=True)
 
-    time.sleep(1)
-    ser.reset_input_buffer()
+    # Push patch
+    info(f"Pushing patch ({os.path.getsize(patch_path)} B) ...")
+    subprocess.run([adb, "push", patch_path, f"{REMOTE_DIR}/pending_patch.tmd"],
+                   capture_output=True, check=True)
 
-    # Enter Update mode
-    info("Sending 'u' to enter Update mode ...")
-    ser.write(b"u\n")
-    ser.flush()
-    time.sleep(0.5)
+    # apply_patch() reads the base model from disk, so no restart needed.
+    info("Sending 'u' to apply patch ...")
+    adb_cmd(adb, f"echo u > {CMD_FIFO}")
+    time.sleep(3)
 
-    # 4-byte LE length prefix
-    ser.write(struct.pack("<I", len(patch_data)))
-    ser.flush()
-    time.sleep(0.1)
-
-    # Patch bytes
-    info(f"Streaming {len(patch_data)} patch bytes ...")
-    ser.write(patch_data)
-    ser.flush()
-
-    # Wait for completion
+    # Check result
+    log = adb_cmd(adb, f"grep -E 'Patch applied|FAILED|Updated model' {REMOTE_LOG} | tail -3",
+                  check=False)
     print()
-    deadline = time.time() + 30
-    success  = False
-    while time.time() < deadline:
-        raw = ser.readline()
-        if not raw:
-            continue
-        line = raw.decode(errors="replace").rstrip()
-        print(f"    {line}")
-        if "Done" in line or "active" in line or "inference" in line.lower():
-            success = True
-            break
-        if "FAILED" in line or "Aborted" in line:
-            break
-        deadline = time.time() + 30  # reset on any activity
+    for line in log.splitlines():
+        info(f"  {line}")
+    print()
 
-    ser.close()
-
-    if success:
+    if "Patch applied" in log and "Updated model" in log:
         ok("Patch applied successfully.")
     else:
-        warn("Update did not confirm success — check output above.")
+        warn("Patch apply may have failed — check logs.")
 
 
-# ── Step 4: Inference ─────────────────────────────────────────────────────────
+# ── Step 4: Inference ───────────────────────────────────────────────────────
 
-def run_inference(port: str, baud: int) -> None:
-    """Send 'i', stream inference output until Ctrl-C."""
-    serial = require_serial()
-
+def run_inference(adb: str) -> None:
+    """Send 'i' via FIFO, stream live anomaly readings from log."""
     hr("STEP 4 — Inference")
-    info("Opening serial port ...")
-    try:
-        ser = serial.Serial(port, baud, timeout=1)
-    except serial.SerialException as e:
-        sys.exit(f"Cannot open port: {e}")
-
-    time.sleep(1)
-    ser.reset_input_buffer()
-
-    info("Sending 'i' to start inference ...")
-    ser.write(b"i\n")
-    ser.flush()
-
+    info("Sending 'i' — live readings (Ctrl-C to stop):")
+    adb_cmd(adb, f"echo i > {CMD_FIFO}")
+    time.sleep(2)
     print()
-    info("Live readings (Ctrl-C to stop):")
+
+    info("Tip: warm the sensor to trigger an anomaly.")
     print()
+
     try:
-        while True:
-            raw = ser.readline()
-            if raw:
-                line = raw.decode(errors="replace").rstrip()
-                marker = "  *** ANOMALY ***" if "ANOMALY" in line else ""
-                print(f"    {line}{marker}")
+        proc = subprocess.Popen(
+            [adb, "shell", f"tail -f {REMOTE_LOG}"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        for line in proc.stdout:
+            line = line.rstrip()
+            if "TEMP" in line or "ANOMALY" in line:
+                print(f"    {line}")
     except KeyboardInterrupt:
         print()
         info("Inference stopped.")
     finally:
-        ser.close()
+        if proc.poll() is None:
+            proc.terminate()
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Interactive TinyMLDelta UNO Q demo runner.",
+        description="End-to-end TinyMLDelta UNO Q demo runner.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
-            Steps:
-              1. Training  — collect sensor CSV from device
-              2. Model     — train autoencoder, generate patch.tmd
-              3. Update    — push patch to device over Monitor serial
-              4. Inference — stream live anomaly-detection readings
-
-            Prerequisites:
-              • Sketch already uploaded (run setup.sh --upload first)
-              • Arduino IDE Serial Monitor CLOSED (shares the serial port)
-              • MCP9600 sensor connected via Qwiic cable
+            Prerequisites (all handled by setup.sh):
+              - demo_app deployed  (./linux/deploy_service.sh)
+              - Sketch uploaded    (./setup.sh)
+              - HS3003 on Qwiic cable
         """),
     )
-    ap.add_argument("--port",  default=None, help="Serial port (auto-detected if omitted)")
-    ap.add_argument("--baud",  type=int, default=115200, help="Baud rate (default: 115200)")
-    ap.add_argument(
-        "--skip-training", action="store_true",
-        help=f"Skip training; use existing {CSV_FILE}",
-    )
-    ap.add_argument(
-        "--skip-model", action="store_true",
-        help=f"Skip model generation; use existing {PATCH_FILE}",
-    )
+    ap.add_argument("--skip-training", action="store_true",
+                    help="Skip training; use existing training_data.csv")
+    ap.add_argument("--skip-model", action="store_true",
+                    help="Skip model gen; use existing patch.tmd")
     args = ap.parse_args()
 
-    # ── Banner ────────────────────────────────────────────────────────────────
+    # ── Banner ────────────────────────────────────────────────────────────
     print()
     hr()
-    print("  TinyMLDelta — Arduino UNO Q Thermocouple Anomaly Demo")
+    print("  TinyMLDelta — Arduino UNO Q Temperature Anomaly Demo")
     hr()
     print()
-    print(textwrap.dedent("""\
-        This script runs the full demo automatically:
-          Train on-device → generate model+patch on PC → push update → infer
 
-        Make sure:
-          ✓ Sketch is uploaded  (run ./setup.sh --upload if needed)
-          ✓ MCP9600 sensor is connected via Qwiic
-          ✓ Arduino IDE Serial Monitor is CLOSED
-    """))
-    input("  Press Enter to continue...")
+    # ── ADB ──────────────────────────────────────────────────────────────
+    adb = find_adb()
+    ok(f"ADB: {adb}")
+    print()
 
-    # ── Port ─────────────────────────────────────────────────────────────────
-    port = args.port or detect_port()
-    if not port:
-        sys.exit(
-            "No serial port found.\n"
-            "  • Is the Arduino UNO Q connected via USB?\n"
-            "  • Specify manually:  python3 run_demo.py --port /dev/cu.usbmodem…"
-        )
-    ok(f"Using port: {port}")
-
-    # ── Training ─────────────────────────────────────────────────────────────
+    # ── Training ─────────────────────────────────────────────────────────
     if args.skip_training:
         if not os.path.exists(CSV_FILE):
-            sys.exit(f"--skip-training requested but {CSV_FILE} not found.")
+            sys.exit(f"--skip-training: {CSV_FILE} not found.")
         ok(f"Skipping training; using {CSV_FILE}")
         csv_path = CSV_FILE
     else:
-        csv_path = run_training(port, args.baud)
+        csv_path = run_training(adb)
 
-    # ── Model generation ──────────────────────────────────────────────────────
+    print()
+
+    # ── Model generation ─────────────────────────────────────────────────
     if args.skip_model:
         if not os.path.exists(PATCH_FILE):
-            sys.exit(f"--skip-model requested but {PATCH_FILE} not found.")
-        ok(f"Skipping model generation; using {PATCH_FILE}")
+            sys.exit(f"--skip-model: {PATCH_FILE} not found.")
+        ok(f"Skipping model gen; using {PATCH_FILE}")
         patch_path = PATCH_FILE
     else:
         patch_path = run_model_generation(csv_path)
 
-    # ── Update ────────────────────────────────────────────────────────────────
-    run_update(port, args.baud, patch_path)
-
-    # ── Inference ─────────────────────────────────────────────────────────────
     print()
-    info("Tip: touch or breathe on the thermocouple probe to trigger an anomaly.")
-    run_inference(port, args.baud)
 
-    # ── Done ──────────────────────────────────────────────────────────────────
+    # ── Update ───────────────────────────────────────────────────────────
+    run_update(adb, patch_path)
+    print()
+
+    # ── Inference ────────────────────────────────────────────────────────
+    run_inference(adb)
+
+    # ── Done ─────────────────────────────────────────────────────────────
     print()
     hr()
     ok("Demo complete.")

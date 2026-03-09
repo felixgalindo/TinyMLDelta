@@ -1,9 +1,14 @@
-# TinyMLDelta — Arduino UNO Q Qwiic Thermocouple Demo
+# TinyMLDelta — Arduino UNO Q Temperature Anomaly Demo
 
 End-to-end demonstration of **TinyMLDelta** on the Arduino UNO Q:
-collect sensor data → train an anomaly-detection model on your PC →
-push a binary patch to the live device → run inference, all without
-re-flashing the full firmware.
+collect real sensor data, train an anomaly-detection model on your PC,
+push a binary patch to the live device, and run inference — all without
+re-flashing firmware.
+
+**All application logic runs on the UNO Q Linux co-processor** (`demo_app`,
+a C++ binary).  The STM32/Zephyr sketch is a thin sensor proxy that reads
+the **Arduino Modulino Thermo** (HS3003) temperature sensor and forwards
+data + commands to Linux via `Bridge.call()`.
 
 ---
 
@@ -11,10 +16,39 @@ re-flashing the full firmware.
 
 | Phase | What happens |
 |-------|-------------|
-| **Training** | Device polls the MCP9600 thermocouple, builds a Z-score baseline, and streams a CSV of 200 temperature readings to your PC. |
-| **Model generation** | `make_model.py` trains a tiny Keras autoencoder on that CSV, converts it to TFLite, and calls `tinymldelta_patchgen.py` to produce a binary `.tmd` patch. |
-| **OTA update** | `send_patch.py` (or `run_demo.py`) sends the patch over the Monitor serial link. The device applies it to an inactive RAM slot, verifies it with CRC32, and atomically flips the active slot — no full re-flash. |
-| **Inference** | Device runs anomaly detection on live thermocouple readings. Touch or breathe on the probe to trigger an anomaly flag. |
+| **Training** | Linux collects 200 temperature readings from the Modulino Thermo sensor and saves a CSV on-board. |
+| **Model generation** | `make_model.py` trains a tiny autoencoder on the CSV, converts to TFLite, and generates a binary `.tmd` patch via `tinymldelta_patchgen.py`. |
+| **OTA update** | The patch is ADB-pushed to the board. Sending `u` triggers `demo_app` to apply the patch with `tmd_apply_patch_from_memory()` and reload the TFLite interpreter — no STM32 re-flash needed. |
+| **Inference** | Linux runs anomaly detection on live temperature readings. Warm or cool the sensor to trigger an anomaly flag. |
+
+---
+
+## Architecture
+
+```
+                        Arduino UNO Q
+         ┌──────────────────────────────────────────────┐
+USB ─────┤  Monitor (serial display)                    │
+         │                        ┌───────────────────┐ │
+         │  STM32U585 / Zephyr    │  Qualcomm Linux   │ │
+         │  ─────────────────     │  ───────────────  │ │
+         │  Modulino Thermo       │  demo_app (C++)   │ │
+         │  (HS3003 via Wire1)    │  • training       │ │
+         │  Bridge.call()  ──────►│  • TFLite infer   │ │
+         │  (sensor data,         │  • patch apply    │ │
+         │   commands)    ◄──────│  • anomaly detect │ │
+         └──────────────────────────────────────────────┘
+                                        ▲
+                              ADB push (patch.tmd)
+```
+
+The STM32 sketch sends a temperature float every 500 ms via
+`Bridge.call("demo/tick", "<temp>")` and forwards Monitor keystrokes
+via `Bridge.call("demo/cmd", "<key>")`.  `demo_app` returns display
+strings that the sketch prints to Monitor.
+
+Patch delivery uses ADB rather than the serial link, so there is no
+size limit from the STM32 RAM.
 
 ---
 
@@ -22,97 +56,86 @@ re-flashing the full firmware.
 
 | Item | Notes |
 |------|-------|
-| **Arduino UNO Q** | STM32U585 + Linux co-processor |
-| **SparkFun Qwiic MCP9600** | I²C thermocouple amplifier, address `0x60` |
-| **Thermocouple probe** | K-type (included with the MCP9600 breakout) |
-| **Qwiic cable** | Connects MCP9600 to the UNO Q Qwiic port |
+| **Arduino UNO Q** | STM32U585 + Qualcomm aarch64 Linux co-processor |
+| **Arduino Modulino Thermo** | HS3003 temperature sensor, I2C address `0x44` on Wire1 (Qwiic) |
+| **Qwiic cable** | Connects sensor to the UNO Q Qwiic port |
 | **USB-C cable** | Powers the board and carries the serial link |
 
 ---
 
 ## Software requirements
 
-| Tool | Version | Install |
-|------|---------|---------|
-| **Arduino IDE** or **arduino-cli** | IDE 2.x / CLI 1.4+ | [arduino.cc](https://www.arduino.cc/en/software) |
-| **arduino:zephyr** platform | 0.53.1+ | Board Manager → "Arduino UNO Q Board" |
-| **SparkFun MCP9600 library** | any | Library Manager → "SparkFun MCP9600 Thermocouple Library" |
-| **Python 3.9+** | 3.9–3.12 | [python.org](https://www.python.org) |
-| **TensorFlow** | 2.x | `pip install tensorflow` |
-| **NumPy** | any | `pip install numpy` |
-| **pyserial** | any | `pip install pyserial` |
+### PC side
+
+| Tool | Install |
+|------|---------|
+| **arduino-cli** | [arduino.cc](https://arduino.github.io/arduino-cli/latest/installation/) |
+| **arduino:zephyr** platform | `arduino-cli core install arduino:zephyr` |
+| **Python 3.9+** | [python.org](https://www.python.org) |
+| **TensorFlow 2.x** | `pip install tensorflow` |
+| **NumPy** | `pip install numpy` |
+
+### Board Linux side
+
+Deployed automatically by `linux/deploy_service.sh`:
+
+| Component | Purpose |
+|-----------|---------|
+| **demo_app** (C++ binary) | Training, inference, patch apply |
+| **libtensorflowlite_c.so** | TFLite C API inference (v2.17) |
+| **TinyMLDelta runtime** | `tmd_apply_patch_from_memory()` |
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Install Python deps, compile & flash the sketch
+# 1. One-time setup: install deps, deploy demo_app, flash sketch
 ./setup.sh
 
-# 2. Run the full demo interactively
+# 2. Run the full demo (training -> model -> patch -> inference)
 python3 run_demo.py
 ```
-
-`run_demo.py` walks you through every step — close the Arduino IDE's
-Serial Monitor before running it (the two tools share the serial port).
 
 ---
 
 ## Manual step-by-step
 
-### 1. Flash the sketch
+### 1. Deploy the Linux app
 
-**Arduino IDE:** open `UnoQ_TinyMLDeltaDemo.ino`, select board
-*Arduino UNO Q*, and click Upload.
-
-**arduino-cli:**
 ```bash
-arduino-cli compile --fqbn arduino:zephyr:unoq \
-    --build-property "build.extra_flags=-DTMD_HAS_TFLM=0" .
-arduino-cli upload  --fqbn arduino:zephyr:unoq \
-    --port /dev/cu.usbmodem*  .
+./linux/deploy_service.sh
 ```
 
-### 2. Open the Serial Monitor
+This pushes `demo_app.cpp`, the TinyMLDelta runtime, and
+`libtensorflowlite_c.so` to the board, builds `demo_app`, and starts it.
 
-Open the Arduino IDE Serial Monitor on the UNO Q port
-(`/dev/cu.usbmodem…` on macOS, `/dev/ttyACM…` on Linux).
-The baud rate selector doesn't affect output — the Monitor channel
-is routed through the board's Linux co-processor, not a raw UART.
+### 2. Flash the sketch
 
-You should see:
-```
-================================================
- TinyMLDelta Qwiic Thermo Anomaly Demo
- Arduino UNO Q | MCP9600 | TinyMLDelta
-================================================
+```bash
+arduino-cli compile --fqbn arduino:zephyr:unoq arduino/UnoQ_TinyMLDeltaDemo
+arduino-cli upload  --fqbn arduino:zephyr:unoq --port /dev/cu.usbmodem* arduino/UnoQ_TinyMLDeltaDemo
 ```
 
-### 3. Training mode
+### 3. Start training
 
-Type `t` and press Enter in the Serial Monitor.
-The device collects 200 temperature samples at 500 ms intervals
-(~100 seconds) and then prints:
+Send commands via the FIFO on the board:
 
-```
-[TRAIN] --- CSV BEGIN ---
-temp_c
-23.4375
-23.5000
-...
-[TRAIN] --- CSV END ---
-[TRAIN] Baseline: mean=23.45 std=0.12 C
+```bash
+ADB=~/Library/Arduino15/packages/arduino/tools/adb/32.0.0/adb
+$ADB shell "echo t > /home/arduino/tinymldelta/cmd.fifo"
 ```
 
-Copy the CSV block (including the `temp_c` header) and save it as
-`training_data.csv` in this directory.
+Wait ~100 seconds for 200 samples, then pull the CSV:
+
+```bash
+$ADB pull /home/arduino/tinymldelta/training_data.csv .
+```
 
 ### 4. Generate model and patch
 
 ```bash
-cd examples/UnoQ_TinyMLDeltaDemo
-python3 make_model.py --csv training_data.csv
+python3 make_model.py training_data.csv
 ```
 
 Output files:
@@ -121,70 +144,118 @@ Output files:
 |------|-------------|
 | `base.tflite` | Autoencoder trained on your data |
 | `target.tflite` | Fine-tuned variant (the update target) |
-| `model.h` | C header embedding `base.tflite` for the sketch |
-| `patch.tmd` | Binary TinyMLDelta patch (base → target) |
+| `model.h` | C header embedding base model (reference only) |
+| `model_config.json` | Z-score normalization parameters (mean, std) |
+| `patch.tmd` | Binary TinyMLDelta patch (base -> target) |
 
-### 5. Send the patch (Update mode)
-
-**Close the IDE Serial Monitor first** (frees the serial port), then:
+### 5. Push base model, config, and patch, then apply
 
 ```bash
-python3 send_patch.py /dev/cu.usbmodem<XXXX> patch.tmd
+$ADB push base.tflite       /home/arduino/tinymldelta/model.tflite
+$ADB push model_config.json /home/arduino/tinymldelta/model_config.json
+$ADB push patch.tmd         /home/arduino/tinymldelta/pending_patch.tmd
+$ADB shell "echo u > /home/arduino/tinymldelta/cmd.fifo"
 ```
 
-The script:
-1. Sends `u` to enter Update mode on the device.
-2. Sends a 4-byte little-endian length prefix.
-3. Streams the patch bytes.
-4. Reads device responses until `[UPDATE] Done` appears.
+### 6. Start inference
 
-### 6. Inference mode
-
-Re-open the Serial Monitor and type `i`.
-The device prints a reading every 500 ms:
-
-```
-[INFER]  23.44 C  score=0.012  OK
-[INFER]  23.50 C  score=0.011  OK
-[INFER]  41.00 C  score=0.087  *** ANOMALY ***
+```bash
+$ADB shell "echo i > /home/arduino/tinymldelta/cmd.fifo"
+# Watch output:
+./linux/deploy_service.sh --logs
 ```
 
-Touch or breathe on the thermocouple probe to trigger anomalies.
+Output:
+```
+TEMP 24.52 C  score=0.0000
+TEMP 24.53 C  score=0.0000
+TEMP 32.50 C  score=0.0600  *** ANOMALY ***
+```
+
+Warm or cool the sensor to trigger anomalies.
 
 ---
 
-## Serial Monitor commands
+## Model architecture
+
+The autoencoder detects anomalies by learning to reconstruct normal
+temperature patterns. Anomalous readings produce high reconstruction error.
+
+```
+Input (4 z-score normalized floats)
+  -> Dense(8, relu)
+  -> Dense(4, relu)     [bottleneck]
+  -> Dense(4, linear)   [reconstruction]
+
+Anomaly score = MSE(input, reconstruction)
+Anomaly if score > 0.04
+```
+
+**Z-score normalization**: `(temp - mean) / std` where `mean` and `std`
+are computed from training data (std floored at 3.0 C to tolerate normal
+room temperature drift).
+
+---
+
+## Demo results
+
+```
+Base model:     2,340 bytes  (train MSE: 0.00216)
+Target model:   2,380 bytes  (train MSE: 0.00142)
+Patch:          1,691 bytes  (9 chunks, CRC32)
+Patch apply:    < 1 ms  (on board)
+```
+
+The patch is **72% of the full model** — with larger real-world models
+(20-200+ KB), patches are typically **< 5%** of the model size.
+
+---
+
+## Commands
 
 | Key | Action |
 |-----|--------|
-| `t` | Start Training mode |
+| `t` | Start Training mode (collect 200 samples) |
 | `i` | Toggle Inference mode |
-| `u` | Enter Update mode (then run `send_patch.py`) |
+| `u` | Apply pending `.tmd` patch |
 | `s` | Print status |
-| `?` | Print menu |
+| `?` | Print help menu |
+
+Commands can be sent via:
+- **Arduino IDE Serial Monitor** (type a key and press Enter)
+- **FIFO**: `adb shell "echo t > /home/arduino/tinymldelta/cmd.fifo"`
+- **`run_demo.py`** (automated end-to-end)
 
 ---
 
 ## How TinyMLDelta works in this demo
 
 ```
-PC                                  Device (STM32U585)
-──────────────────────────────────────────────────────
-make_model.py                       RAM slot A  [base model]
-  │                                 RAM slot B  [empty]
-  └─ patch.tmd ─► send_patch.py
-                      │
-                      └─ Monitor serial ─► tmd_apply_patch_from_memory()
-                                               │
-                                               ├─ Copy slot A → slot B
-                                               ├─ Apply diff chunks to slot B
-                                               ├─ Verify CRC32
-                                               └─ Flip active slot → B
-                                           Device now runs from slot B
+PC                          UNO Q Linux            STM32 (sensor proxy)
+────────────────────────────────────────────────────────────────────────
+python3 make_model.py
+  |- base.tflite
+  |- model_config.json
+  |- patch.tmd
+       |
+adb push ───────────────► /home/arduino/tinymldelta/
+                             model.tflite
+                             model_config.json
+                             pending_patch.tmd
+                                    |
+                    cmd: 'u' ──────►  demo_app
+                                        apply_patch()
+                                          |- read base model
+                                          |- tmd_apply_patch_from_memory()
+                                          |- write updated model.tflite
+                                        TfLiteInterpreterCreate()
+                                    |
+                    cmd: 'i' ──────►  demo_app
+                                        inference_tick(temp_c)
+                                          |- z-score normalize
+                                          |- TfLiteInterpreterInvoke()
+                                          |- MSE > threshold? ANOMALY
 ```
-
-The patch is typically a few hundred bytes instead of a full
-model re-flash — ideal for bandwidth-constrained OTA updates.
 
 ---
 
@@ -192,11 +263,13 @@ model re-flash — ideal for bandwidth-constrained OTA updates.
 
 | Symptom | Fix |
 |---------|-----|
-| No output in Serial Monitor | Reset the board; make sure Qwiic cable is seated |
-| `[SENSOR] MCP9600 not found` | Board was powered before sensor was connected — reset it |
-| `send_patch.py` can't open port | Close the Arduino IDE Serial Monitor first |
-| `[UPDATE] FAILED` | Patch too large for RAM slot (kPatchBufSize = 4096 B) |
-| `pip install tensorflow` fails | Use Python 3.9–3.12; TF doesn't yet support 3.13+ |
+| No ticks in demo_app.log | Reset board; check Modulino Thermo Qwiic connection |
+| `Model not found` | Push `base.tflite` as `model.tflite` via ADB |
+| `No pending patch found` | `adb push patch.tmd /home/arduino/tinymldelta/pending_patch.tmd` |
+| Normalization warning | Push `model_config.json` via ADB (generated by `make_model.py`) |
+| demo_app not running | `./linux/deploy_service.sh --restart` |
+| ADB not found | Check path in `deploy_service.sh`; install via arduino-cli |
+| `pip install tensorflow` fails | Use Python 3.9-3.12 |
 
 ---
 
@@ -204,13 +277,17 @@ model re-flash — ideal for bandwidth-constrained OTA updates.
 
 ```
 UnoQ_TinyMLDeltaDemo/
-├── UnoQ_TinyMLDeltaDemo.ino      Main Arduino sketch
-├── tinymldelta_ports_arduino.cpp  RAM-backed TinyMLDelta port
-├── flash_layout_uno_q.h           Virtual address map for A/B slots
-├── model.h                        Placeholder model (replace with make_model.py output)
-├── make_model.py                  Train autoencoder, generate patch.tmd
-├── send_patch.py                  Stream patch to device over serial
-├── run_demo.py                    Interactive end-to-end demo runner
-├── setup.sh                       Dependency installer + sketch compiler
-└── README.md                      This file
+├── arduino/
+│   └── UnoQ_TinyMLDeltaDemo/
+│       └── UnoQ_TinyMLDeltaDemo.ino   STM32 sensor proxy sketch (Modulino Thermo via Wire1)
+├── linux/
+│   ├── demo_app.cpp           Main demo application (runs on board Linux)
+│   ├── msgpack.h              MsgPack encoder/decoder (header-only)
+│   ├── router_client.h        Arduino-router RPC client (header-only)
+│   ├── Makefile               Build config for demo_app
+│   └── deploy_service.sh      Push + build + manage demo_app via ADB
+├── make_model.py              Train autoencoder, generate patch.tmd + model_config.json
+├── run_demo.py                Automated end-to-end demo runner
+├── setup.sh                   One-time dependency install + deploy + flash
+└── README.md                  This file
 ```
