@@ -23,7 +23,7 @@ Usage:
   python3 run_demo.py [--skip-training] [--skip-model]
 
 Prerequisites (handled by setup.sh):
-  - demo_app deployed to board  (./linux/deploy_service.sh)
+  - demo_app deployed to board  (./tflite/deploy_service.sh)
   - Sketch uploaded              (./setup.sh)
   - HS3003 sensor on Qwiic cable
   - ADB accessible
@@ -105,7 +105,7 @@ def run_training(adb: str) -> str:
     # Check demo_app is running
     out = adb_cmd(adb, "pgrep -x demo_app", check=False)
     if not out:
-        sys.exit("demo_app is not running. Deploy with: ./linux/deploy_service.sh")
+        sys.exit("demo_app is not running. Deploy with: ./tflite/deploy_service.sh")
 
     info("Sending 't' → collecting 200 samples (~100 s) ...")
     adb_cmd(adb, f"echo t > {CMD_FIFO}")
@@ -257,7 +257,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Prerequisites (all handled by setup.sh):
-              - demo_app deployed  (./linux/deploy_service.sh)
+              - demo_app deployed  (./tflite/deploy_service.sh)
               - Sketch uploaded    (./setup.sh)
               - HS3003 on Qwiic cable
         """),

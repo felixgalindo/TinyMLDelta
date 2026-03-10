@@ -115,6 +115,14 @@ examples/posix/--size
 
 # UnoQ demo generated artifacts
 examples/UnoQ_TinyMLDeltaDemo/training_data.csv
+examples/UnoQ_TinyMLDeltaDemo/training_data_ei.csv
 examples/UnoQ_TinyMLDeltaDemo/base.tflite
 examples/UnoQ_TinyMLDeltaDemo/target.tflite
-examples/UnoQ_EI_TinyMLDeltaDemo/training_data.csv
+examples/UnoQ_TinyMLDeltaDemo/model_config.json
+
+# TFLite shared library (auto-downloaded by deploy_service.sh)
+examples/UnoQ_TinyMLDeltaDemo/tflite/libtensorflowlite_c.so
+paper/tinymldelta.aux
+paper/tinymldelta.out
+paper/tinymldelta.pdf
+paper/tinymldelta.tex

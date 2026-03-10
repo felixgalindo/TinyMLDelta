@@ -29,7 +29,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEMO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+COMMON_DIR="$DEMO_DIR/common"
 ADB="$HOME/Library/Arduino15/packages/arduino/tools/adb/32.0.0/adb"
 REMOTE_DIR="/home/arduino/tinymldelta"
 SERVICE_BIN="demo_app"
@@ -150,10 +152,11 @@ fi
 info "Pushing source files to board..."
 
 # Push demo_app sources and Makefile
-$ADB push "$SCRIPT_DIR/demo_app.cpp"    "$REMOTE_DIR/demo_app.cpp"
-$ADB push "$SCRIPT_DIR/msgpack.h"       "$REMOTE_DIR/msgpack.h"
-$ADB push "$SCRIPT_DIR/router_client.h" "$REMOTE_DIR/router_client.h"
-$ADB push "$SCRIPT_DIR/Makefile"        "$REMOTE_DIR/Makefile"
+$ADB push "$SCRIPT_DIR/demo_app.cpp"       "$REMOTE_DIR/demo_app.cpp"
+$ADB push "$COMMON_DIR/msgpack.h"         "$REMOTE_DIR/msgpack.h"
+$ADB push "$COMMON_DIR/router_client.h"   "$REMOTE_DIR/router_client.h"
+$ADB push "$COMMON_DIR/tmd_port_memory.h" "$REMOTE_DIR/tmd_port_memory.h"
+$ADB push "$SCRIPT_DIR/Makefile"           "$REMOTE_DIR/Makefile"
 
 # Push TinyMLDelta runtime sources (needed by Makefile)
 $ADB shell "mkdir -p $REMOTE_DIR/runtime/src $REMOTE_DIR/runtime/include"

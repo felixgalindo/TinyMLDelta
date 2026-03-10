@@ -9,6 +9,7 @@
 # Clean:             make clean
 
 RUNTIME     := ../../../runtime
+COMMON      := ../common
 CXX         := g++
 CC          := gcc
 
@@ -17,7 +18,8 @@ CC          := gcc
 TFLITE_LIB  ?= /home/arduino/tinymldelta
 
 CXXFLAGS := -std=c++17 -O2 -Wall \
-            -I$(RUNTIME)/include
+            -I$(RUNTIME)/include \
+            -I$(COMMON)
 
 CFLAGS   := -std=c11 -O2 -Wall \
             -I$(RUNTIME)/include

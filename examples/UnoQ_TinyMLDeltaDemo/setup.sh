@@ -88,11 +88,11 @@ hr
 info "Deploying demo_app to board Linux side via ADB..."
 ADB="$HOME/Library/Arduino15/packages/arduino/tools/adb/32.0.0/adb"
 if [ -x "$ADB" ] && $ADB devices 2>/dev/null | grep -q "device$"; then
-    bash "$SCRIPT_DIR/linux/deploy_service.sh"
+    bash "$SCRIPT_DIR/tflite/deploy_service.sh"
     ok "demo_app deployed."
 else
     warn "Board not found via ADB — skipping Linux deploy."
-    warn "Run './linux/deploy_service.sh' once the board is connected."
+    warn "Run './tflite/deploy_service.sh' once the board is connected."
 fi
 
 # ── 5. Compile ────────────────────────────────────────────────────────────────

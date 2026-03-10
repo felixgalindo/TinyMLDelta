@@ -17,7 +17,8 @@
  *   that is printed to Monitor.
  *
  * Deploy demo_app to the Linux side before flashing:
- *   ./linux/deploy_service.sh
+ *   ./tflite/deploy_service.sh        (TFLite C API variant)
+ *   ./edgeimpulse/deploy_service.sh   (Edge Impulse SDK variant)
  *
  * Required libraries (Arduino Library Manager):
  *   - Arduino_RouterBridge  (built-in to arduino:zephyr platform)

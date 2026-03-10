@@ -38,10 +38,8 @@
 #include <time.h>
 #include <unistd.h>
 
-/* TinyMLDelta C library */
-#include "tinymldelta.h"
-#include "tinymldelta_config.h"
-#include "tinymldelta_ports.h"
+/* TinyMLDelta C library + in-memory flash port (shared with edgeimpulse/) */
+#include "tmd_port_memory.h"
 
 // =============================================================================
 // Configuration
@@ -57,7 +55,6 @@ static constexpr int         kWindowSize  = 4;      // must match sketch
 static constexpr float       kAnomalyMse  = 0.04f;
 static constexpr int         kMaxSamples  = 200;
 static constexpr float       kBadTemp     = -999.0f;
-static constexpr int         kMetaSize    = 256;
 
 // =============================================================================
 // Logging (also used by router_client.h)
@@ -81,123 +78,9 @@ void log_msg(const char *level, const char *fmt, ...) {
 #define LOG_WARN(fmt, ...)  log_msg("WARN ", fmt, ##__VA_ARGS__)
 #define LOG_ERROR(fmt, ...) log_msg("ERROR", fmt, ##__VA_ARGS__)
 
-/* MsgPack codec and RouterClient (separated into headers). */
+/* MsgPack codec and RouterClient (shared with edgeimpulse/). */
 #include "msgpack.h"
 #include "router_client.h"
-
-// =============================================================================
-// TinyMLDelta — in-memory flash port
-//
-// Virtual address layout (per apply_patch() call):
-//   [0            .. slot_size-1]   Slot A  (base model, read)
-//   [slot_size    .. 2*slot_size-1] Slot B  (receives patched model)
-//   [2*slot_size  .. +kMetaSize-1]  Journal
-// =============================================================================
-
-static uint8_t    *g_slot_a    = nullptr;
-static uint8_t    *g_slot_b    = nullptr;
-static uint8_t     g_meta[kMetaSize];
-static size_t      g_slot_size = 0;
-static uint8_t     g_active    = 0;
-static tmd_layout_t g_layout   = {};
-
-static uint8_t *g_addr_ptr(uint32_t addr, uint32_t len) {
-    uint32_t sa_end = (uint32_t)g_slot_size;
-    uint32_t sb_end = (uint32_t)(g_slot_size * 2);
-    uint32_t me_end = (uint32_t)(g_slot_size * 2 + kMetaSize);
-    if (addr          < sa_end && addr + len <= sa_end) return g_slot_a + addr;
-    if (addr >= sa_end && addr + len <= sb_end)         return g_slot_b + (addr - sa_end);
-    if (addr >= sb_end && addr + len <= me_end)         return g_meta   + (addr - sb_end);
-    return nullptr;
-}
-
-static bool g_flash_erase(uint32_t addr, uint32_t len) {
-    uint8_t *p = g_addr_ptr(addr, len);
-    if (!p) return false;
-    memset(p, 0xFF, len);
-    return true;
-}
-static bool g_flash_write(uint32_t addr, const void *src, uint32_t len) {
-    uint8_t *p = g_addr_ptr(addr, len);
-    if (!p || !src) return false;
-    memcpy(p, src, len);
-    return true;
-}
-static bool g_flash_read(uint32_t addr, void *dst, uint32_t len) {
-    const uint8_t *p = g_addr_ptr(addr, len);
-    if (!p || !dst) return false;
-    memcpy(dst, p, len);
-    return true;
-}
-
-#if TMD_FEAT_CRC32
-static uint32_t g_crc32(const void *buf, size_t len) {
-    const uint8_t *p = (const uint8_t *)buf;
-    uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < len; ++i) {
-        crc ^= p[i];
-        for (int k = 0; k < 8; ++k) {
-            uint32_t mask = -(crc & 1u);
-            crc = (crc >> 1) ^ (0xEDB88320u & mask);
-        }
-    }
-    return ~crc;
-}
-#endif
-
-static uint8_t g_get_active(void)         { return g_active; }
-static bool    g_set_active(uint8_t idx)  { g_active = idx; return true; }
-
-#if TMD_FEAT_JOURNAL
-static bool g_journal_read(tmd_journal_t *out) {
-    if (!out) return false;
-    memcpy(out, g_meta, sizeof(*out));
-    return true;
-}
-static bool g_journal_write(const tmd_journal_t *in) {
-    if (!in) return false;
-    memcpy(g_meta, in, sizeof(*in));
-    return true;
-}
-static bool g_journal_clear(void) {
-    memset(g_meta, 0x00, sizeof(tmd_journal_t));
-    return true;
-}
-#endif
-
-#if TMD_FEAT_LOG
-static void g_tmd_log(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fprintf(stderr, "[TMD] ");
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fflush(stderr);
-}
-#endif
-
-static const tmd_ports_t g_ports = {
-    .flash_erase     = g_flash_erase,
-    .flash_write     = g_flash_write,
-    .flash_read      = g_flash_read,
-#if TMD_FEAT_CRC32
-    .crc32           = g_crc32,
-#endif
-    .get_active_slot = g_get_active,
-    .set_active_slot = g_set_active,
-#if TMD_FEAT_JOURNAL
-    .journal_read    = g_journal_read,
-    .journal_write   = g_journal_write,
-    .journal_clear   = g_journal_clear,
-#endif
-#if TMD_FEAT_LOG
-    .log             = g_tmd_log,
-#endif
-};
-
-// Called by tinymldelta_core.c (C linkage, no name mangling).
-extern "C" const tmd_ports_t  *tmd_ports(void)  { return &g_ports;  }
-extern "C" const tmd_layout_t *tmd_layout(void) { return &g_layout; }
 
 // =============================================================================
 // File helpers
@@ -331,44 +214,30 @@ public:
         std::lock_guard<std::mutex> lk(lock_);
         unload_locked();
 
-        // Set up in-memory TinyMLDelta port (re-initialized every call).
+        // Set up in-memory TinyMLDelta port and apply patch.
         size_t slot_sz = base.size() + 8192;
-        std::vector<uint8_t> slot_a(slot_sz, 0xFF);
-        std::vector<uint8_t> slot_b(slot_sz, 0xFF);
-        memcpy(slot_a.data(), base.data(), base.size());
-        memset(g_meta, 0x00, kMetaSize);
-        g_slot_a    = slot_a.data();
-        g_slot_b    = slot_b.data();
-        g_slot_size = slot_sz;
-        g_active    = 0;
-        g_layout.slotA.addr = 0;
-        g_layout.slotA.size = (uint32_t)slot_sz;
-        g_layout.slotB.addr = (uint32_t)slot_sz;
-        g_layout.slotB.size = (uint32_t)slot_sz;
-        g_layout.meta_addr  = (uint32_t)(slot_sz * 2);
-        g_layout.meta_size  = (uint32_t)kMetaSize;
+        tmd_mem_setup(base.data(), base.size(), slot_sz);
 
-        // Apply patch using TinyMLDelta C library directly.
         struct timespec t0, t1;
         clock_gettime(CLOCK_MONOTONIC, &t0);
         tmd_status_t st = tmd_apply_patch_from_memory(patch.data(), (uint32_t)patch.size());
         clock_gettime(CLOCK_MONOTONIC, &t1);
         double ms = (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
 
-        const uint8_t *updated = (g_active == 0) ? slot_a.data() : slot_b.data();
-        size_t updated_len = slot_sz;
-        g_slot_a = g_slot_b = nullptr;
+        size_t updated_len;
+        const uint8_t *updated = tmd_mem_result(&updated_len);
 
         if (st != TMD_STATUS_OK) {
             LOG_ERROR("tmd_apply_patch_from_memory failed (status=%d)", (int)st);
+            tmd_mem_cleanup();
             return false;
         }
         LOG_INFO("Patch applied in %.2f ms", ms);
 
-        while (updated_len > 0 && updated[updated_len - 1] == 0xFF) --updated_len;
-
         std::string tmp = model_path_ + ".new";
-        if (!write_file(tmp.c_str(), updated, updated_len)) return false;
+        bool wrote = write_file(tmp.c_str(), updated, updated_len);
+        tmd_mem_cleanup();
+        if (!wrote) return false;
         if (rename(tmp.c_str(), model_path_.c_str()) != 0) {
             LOG_ERROR("rename failed: %s", strerror(errno));
             return false;
