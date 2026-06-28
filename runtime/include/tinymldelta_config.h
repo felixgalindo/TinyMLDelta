@@ -79,6 +79,13 @@
 #define TMD_FEAT_COPYADD  0
 #endif
 
+/* Verify the active slot matches the patch's base digest before applying, so a
+ * patch built for a different base model is rejected (not silently misapplied).
+ * Costs one extra read+CRC of the base slot per apply. */
+#ifndef TMD_FEAT_VERIFY_BASE
+#define TMD_FEAT_VERIFY_BASE  1
+#endif
+
 /* --------------------------------------------------------------------------
  *  Flash & Buffer Geometry
  * --------------------------------------------------------------------------

@@ -28,6 +28,12 @@ for ex in capability_envelope io_schema; do
   make -C "$ROOT/examples/$ex" clean >/dev/null 2>&1 || true
 done
 
+echo; echo "== C unit tests =="
+ubin="$(mktemp)"
+cc ${san_c:--std=c99 -O1} -I "$ROOT/runtime/include" -o "$ubin" "$HERE/c/unit_tests.c"
+"$ubin"
+rm -f "$ubin"
+
 echo; echo "== C core integration test =="
 if [ -n "$san_c" ]; then
   CC="cc" CXX="c++" CFLAGS="$san_c" CXXFLAGS="$san_cxx" PY="$PY" "$HERE/c/run_core_tests.sh"

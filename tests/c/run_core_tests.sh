@@ -92,6 +92,26 @@ for kind in $KINDS; do
   fi
 done
 
+# Negative test: a patch built for baseA must be REJECTED when applied onto a
+# different baseB (base-digest guard). Expect core_apply to exit non-zero.
+"$PY" - "$WORK" <<'PY'
+import sys, random
+W = sys.argv[1]
+def rnd(n, s): r = random.Random(s); return bytes(r.randrange(256) for _ in range(n))
+baseA, baseB = rnd(8000, 21), rnd(8000, 22)      # same length, different content
+target = bytearray(baseA)
+for i in range(100, 300): target[i] ^= 0xAA
+open(W + "/baseA.bin", "wb").write(baseA)
+open(W + "/baseB.bin", "wb").write(baseB)
+open(W + "/targetA.bin", "wb").write(bytes(target))
+PY
+"$PY" "$PATCHGEN" "$WORK/baseA.bin" "$WORK/targetA.bin" "$WORK/patchA.tmd" --algo crc32 >/dev/null
+if ${RUNNER:-} "$WORK/core_apply" "$WORK/baseB.bin" "$WORK/patchA.tmd" "$WORK/out.bin" "$SLOT" >/dev/null 2>&1; then
+  echo "  [FAIL] wrongbase (patch for baseA was NOT rejected on baseB)"; fail=1
+else
+  echo "  [PASS] wrongbase (rejected: base digest mismatch)"
+fi
+
 echo
 if [ "$fail" -eq 0 ]; then echo "OK — core reconstructs target byte-exact in all cases"; else echo "FAIL"; fi
 exit $fail

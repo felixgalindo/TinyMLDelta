@@ -45,6 +45,8 @@ jobs:
           SAN_CXX: "-std=c++11 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1"
         run: |
           set -e
+          ${{ matrix.cc }} $SAN_C -I runtime/include -o /tmp/tmd_unit tests/c/unit_tests.c
+          /tmp/tmd_unit
           for ex in capability_envelope io_schema; do
             make -C examples/$ex CC=${{ matrix.cc }} CFLAGS="$SAN_C" test
             make -C examples/$ex clean

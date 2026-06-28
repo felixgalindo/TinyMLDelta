@@ -545,6 +545,36 @@ tmd_status_t tmd_apply_patch_from_memory(const uint8_t* patch, size_t patch_len)
     return TMD_STATUS_ERR_PARAM;
   }
 
+#if TMD_FEAT_VERIFY_BASE && TMD_FEAT_CRC32
+  /* Verify the active slot matches the patch's base digest (CRC32). Rejects a
+   * patch generated for a different base model before any flash is touched. */
+  if (hdr->algo == 1) {
+    if (hdr->base_len > slot_src->size) return TMD_STATUS_ERR_PARAM;
+    uint32_t expect = (uint32_t)hdr->base_chk[0] |
+                      ((uint32_t)hdr->base_chk[1] << 8) |
+                      ((uint32_t)hdr->base_chk[2] << 16) |
+                      ((uint32_t)hdr->base_chk[3] << 24);
+    uint8_t vbuf[TMD_SCRATCH_SZ];
+    uint32_t crc = 0xFFFFFFFFu, rem = hdr->base_len, vaddr = slot_src->addr;
+    while (rem > 0) {
+      uint32_t n = (rem > TMD_SCRATCH_SZ) ? TMD_SCRATCH_SZ : rem;
+      if (!P->flash_read(vaddr, vbuf, n)) return TMD_STATUS_ERR_FLASH;
+      for (uint32_t bi = 0; bi < n; ++bi) {       /* zlib CRC-32, incremental */
+        crc ^= vbuf[bi];
+        for (int k = 0; k < 8; ++k)
+          crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)(-(int32_t)(crc & 1u)));
+      }
+      vaddr += n; rem -= n;
+    }
+    crc ^= 0xFFFFFFFFu;
+    if (crc != expect) {
+      TMD_LOG("TinyMLDelta: base digest mismatch (got=0x%08lx exp=0x%08lx)\n",
+              (unsigned long)crc, (unsigned long)expect);
+      return TMD_STATUS_ERR_INTEGRITY;
+    }
+  }
+#endif
+
   /* COPY/ADD opcode-stream patches build the inactive slot fresh (no copy). */
   if (hdr->flags & TMD_FLAG_COPYADD) {
 #if TMD_FEAT_COPYADD
