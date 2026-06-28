@@ -51,39 +51,64 @@ typedef struct {
  *
  * @return 0 on success, -1 on error (e.g., overflow).
  */
-static int tmd_rle_decode(const uint8_t* in, uint16_t in_len,
-                          uint8_t* out, uint32_t out_cap,
-                          uint32_t* out_len) {
-#if !TMD_FEAT_RLE
-  (void)in; (void)in_len; (void)out; (void)out_cap; (void)out_len;
-  return -1;
-#else
+#if TMD_FEAT_RLE
+/** @brief Decoded length of an RLE payload (scan only, no output buffer). */
+static uint32_t tmd_rle_decoded_len(const uint8_t* in, uint16_t in_len) {
   uint32_t o = 0;
   uint16_t i = 0;
+  while (i + 1 < in_len) {            /* pairs of [count][value] */
+    uint8_t count = in[i];
+    i += 2;
+    o += (count == 0) ? 256u : (uint32_t)count;
+  }
+  return o;
+}
 
-  TMD_LOG("TinyMLDelta: RLE decode start (in_len=%u)\n", (unsigned)in_len);
+/**
+ * @brief Decode an RLE payload and write it to flash in <= @p cap windows.
+ *
+ * Streams the decode so an arbitrarily large RLE chunk needs only @p cap bytes
+ * of RAM (the shared scratch buffer), not the full decoded size. A run that
+ * does not fit the current window is split across flushes.
+ *
+ * @return ::TMD_STATUS_OK on success, ::TMD_STATUS_ERR_FLASH on a write failure.
+ */
+static tmd_status_t tmd_rle_decode_write(const tmd_ports_t* P,
+                                         const uint8_t* in, uint16_t in_len,
+                                         uint8_t* scratch, uint32_t cap,
+                                         uint32_t dst_addr) {
+  uint16_t i = 0;
+  uint32_t o = 0;        /* bytes buffered in scratch  */
+  uint32_t written = 0;  /* bytes already flushed       */
 
-  while (i + 1 <= in_len) {
+  TMD_LOG("TinyMLDelta: RLE stream decode (in_len=%u cap=%lu)\n",
+          (unsigned)in_len, (unsigned long)cap);
+
+  while (i + 1 < in_len) {
     uint8_t count = in[i++];
     uint8_t val   = in[i++];
-    uint32_t run = (count == 0) ? 256u : (uint32_t)count;
-
-    if (o + run > out_cap) {
-      TMD_LOG("TinyMLDelta: RLE overflow (o=%lu run=%lu cap=%lu)\n",
-              (unsigned long)o,
-              (unsigned long)run,
-              (unsigned long)out_cap);
-      return -1;
+    uint32_t run  = (count == 0) ? 256u : (uint32_t)count;
+    while (run > 0) {
+      if (o == cap) {                /* flush full window */
+        if (!P->flash_write(dst_addr + written, scratch, o))
+          return TMD_STATUS_ERR_FLASH;
+        written += o;
+        o = 0;
+      }
+      uint32_t space = cap - o;
+      uint32_t n = (run < space) ? run : space;
+      memset(scratch + o, val, n);
+      o += n;
+      run -= n;
     }
-    memset(out + o, val, run);
-    o += run;
   }
-  *out_len = o;
-
-  TMD_LOG("TinyMLDelta: RLE decode done (out_len=%lu)\n", (unsigned long)o);
-  return 0;
-#endif
+  if (o > 0) {                       /* flush tail */
+    if (!P->flash_write(dst_addr + written, scratch, o))
+      return TMD_STATUS_ERR_FLASH;
+  }
+  return TMD_STATUS_OK;
 }
+#endif /* TMD_FEAT_RLE */
 
 /**
  * @brief Parse metadata TLV block from the patch header.
@@ -486,50 +511,46 @@ tmd_status_t tmd_apply_patch_from_memory(const uint8_t* patch, size_t patch_len)
     }
 #endif
 
-    const uint8_t* data = NULL;
-    uint32_t data_len = 0;
-
-    if (ch->enc == 0) { /* RAW */
-      data = enc_data;
-      data_len = ch->len;
-      TMD_LOG("TinyMLDelta:  chunk[%lu] RAW len=%lu\n",
-              (unsigned long)idx,
-              (unsigned long)data_len);
-    } else if (ch->enc == 1) { /* RLE */
-      if (tmd_rle_decode(enc_data, ch->len,
-                         scratch, sizeof(scratch),
-                         &data_len) != 0) {
-        TMD_LOG("TinyMLDelta: RLE decode failed idx=%lu\n",
-                (unsigned long)idx);
-        return TMD_STATUS_ERR_HDR;
+    if (ch->enc == 0) { /* RAW: write verbatim from the patch buffer */
+      if (ch->off + ch->len > slot_dst->size) {
+        TMD_LOG("TinyMLDelta: chunk out of range (off=%lu,len=%u,size=%lu)\n",
+                (unsigned long)ch->off, (unsigned)ch->len,
+                (unsigned long)slot_dst->size);
+        return TMD_STATUS_ERR_PARAM;
       }
-      data = scratch;
-      TMD_LOG("TinyMLDelta:  chunk[%lu] RLE decoded len=%lu\n",
-              (unsigned long)idx,
-              (unsigned long)data_len);
+      uint32_t addr = slot_dst->addr + ch->off;
+      TMD_LOG("TinyMLDelta:  chunk[%lu] RAW write addr=0x%08lx len=%u\n",
+              (unsigned long)idx, (unsigned long)addr, (unsigned)ch->len);
+      if (!P->flash_write(addr, enc_data, ch->len)) {
+        TMD_LOG("TinyMLDelta: flash_write failed @0x%08lx len=%u\n",
+                (unsigned long)addr, (unsigned)ch->len);
+        return TMD_STATUS_ERR_FLASH;
+      }
+    } else if (ch->enc == 1) { /* RLE: range-check, then stream decode -> flash */
+#if TMD_FEAT_RLE
+      uint32_t dec_len = tmd_rle_decoded_len(enc_data, ch->len);
+      if (ch->off + dec_len > slot_dst->size) {
+        TMD_LOG("TinyMLDelta: chunk out of range (off=%lu,len=%lu,size=%lu)\n",
+                (unsigned long)ch->off, (unsigned long)dec_len,
+                (unsigned long)slot_dst->size);
+        return TMD_STATUS_ERR_PARAM;
+      }
+      uint32_t addr = slot_dst->addr + ch->off;
+      TMD_LOG("TinyMLDelta:  chunk[%lu] RLE decoded len=%lu -> addr=0x%08lx\n",
+              (unsigned long)idx, (unsigned long)dec_len, (unsigned long)addr);
+      tmd_status_t wst = tmd_rle_decode_write(P, enc_data, ch->len,
+                                              scratch, sizeof(scratch), addr);
+      if (wst != TMD_STATUS_OK) {
+        TMD_LOG("TinyMLDelta: RLE decode/write failed idx=%lu\n",
+                (unsigned long)idx);
+        return wst;
+      }
+#else
+      return TMD_STATUS_ERR_UNSUPPORTED;
+#endif
     } else {
       TMD_LOG("TinyMLDelta: unsupported encoding %u\n", (unsigned)ch->enc);
       return TMD_STATUS_ERR_UNSUPPORTED;
-    }
-
-    if (ch->off + data_len > slot_dst->size) {
-      TMD_LOG("TinyMLDelta: chunk out of range (off=%lu,len=%lu,size=%lu)\n",
-              (unsigned long)ch->off,
-              (unsigned long)data_len,
-              (unsigned long)slot_dst->size);
-      return TMD_STATUS_ERR_PARAM;
-    }
-
-    uint32_t addr = slot_dst->addr + ch->off;
-    TMD_LOG("TinyMLDelta:  flash_write addr=0x%08lx len=%lu\n",
-            (unsigned long)addr,
-            (unsigned long)data_len);
-
-    if (!P->flash_write(addr, data, data_len)) {
-      TMD_LOG("TinyMLDelta: flash_write failed @0x%08lx len=%lu\n",
-              (unsigned long)addr,
-              (unsigned long)data_len);
-      return TMD_STATUS_ERR_FLASH;
     }
 
 #if TMD_FEAT_JOURNAL

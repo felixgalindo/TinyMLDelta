@@ -70,6 +70,10 @@ ALGO_CRC32 = 1
 ENC_RAW = 0
 ENC_RLE = 1  # [count][byte], count 0 => 256
 
+#: Max encoded payload per chunk. The chunk `len` field is uint16, so a single
+#: chunk payload may not exceed this. Larger diff regions are split.
+MAX_CHUNK_LEN = 0xFFFF  # 65535
+
 # Metadata TLV tags (must match tinymldelta_internal.h)
 TMD_META_REQ_ARENA_BYTES = 0x01
 TMD_META_TFLM_ABI = 0x02
@@ -389,17 +393,22 @@ def main() -> None:
     meta_len = len(meta)
     flags = 0
 
-    # 8) Encode chunks with optional RLE
+    # 8) Encode chunks with optional RLE.
+    #    The chunk `len` field is uint16, so a single encoded payload may not
+    #    exceed 65535 bytes. Split large diff regions into <=64 KB sub-chunks
+    #    (each written contiguously at off + sub-offset) before encoding.
     chunks = []
     for off, raw in diffs:
-        rle = rle_encode(raw)
-        if len(rle) < len(raw):
-            enc = ENC_RLE
-            data = rle
-        else:
-            enc = ENC_RAW
-            data = raw
-        chunks.append((off, enc, data))
+        for s in range(0, len(raw), MAX_CHUNK_LEN):
+            seg = raw[s:s + MAX_CHUNK_LEN]
+            rle = rle_encode(seg)
+            if len(rle) < len(seg):
+                enc = ENC_RLE
+                data = rle
+            else:
+                enc = ENC_RAW
+                data = seg
+            chunks.append((off + s, enc, data))
 
     # 9) Write final patch
     with open(args.out, "wb") as out:
