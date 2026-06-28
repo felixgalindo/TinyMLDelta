@@ -28,6 +28,7 @@ import numpy as np
 
 import data
 import scenarios
+from backends import measure_backends
 from convert import convert, to_tflite_int8
 from patchsize import measure
 from resnet8 import build_resnet8
@@ -73,6 +74,11 @@ def patch_pair(base_model, target_model, rep_clean, rep_drift, quant_modes,
             tgt_b = convert(target_model, q, rep_clean)
 
         r = measure(base_b, tgt_b)
+        # Compression-backend comparison on the same pair (RAW/RLE/LZ4).
+        bk = measure_backends(base_b, tgt_b)
+        r["backend_raw"] = bk["raw"]["bytes"]
+        r["backend_rle"] = bk["rle"]["bytes"]
+        r["backend_lz4"] = bk["lz4"]["bytes"]
         r.update({
             "scenario": scenario,
             "detail": detail,
@@ -161,8 +167,9 @@ def main():
 
     # ---- Write CSV --------------------------------------------------------- #
     fields = ["scenario", "detail", "quant", "base_bytes", "target_bytes",
-              "tmd_bytes", "tmd_chunks", "tmd_ratio", "gzip_full_bytes",
-              "bsdiff_bytes", "detools_bytes", "target_acc"]
+              "tmd_bytes", "tmd_chunks", "tmd_ratio",
+              "backend_raw", "backend_rle", "backend_lz4",
+              "gzip_full_bytes", "bsdiff_bytes", "detools_bytes", "target_acc"]
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
