@@ -233,11 +233,20 @@ typedef struct __attribute__((packed)) {
 
 | Tag | Name | Type | Purpose |
 |-----|------|------|---------|
-| `0x01` | `REQ_ARENA_BYTES` | u32 | Reject if firmware arena < this value |
-| `0x02` | `TFLM_ABI` | u16 | Reject on ABI version mismatch |
-| `0x03` | `OPSET_HASH` | u32 | Reject if op-set changed |
-| `0x04` | `IO_HASH` | u32 | Reject if I/O tensor schema changed |
+| `0x01` | `REQ_ARENA_BYTES` | u32 | Reject if firmware arena < this value (active when present) |
+| `0x02` | `TFLM_ABI` | u16 | Reject if target ABI > firmware ABI (active when present) |
+| `0x03` | `OPSET_HASH` | u32 | Reject on op-set hash mismatch — **opt-in, off by default** |
+| `0x04` | `IO_HASH` | u32 | Reject on I/O signature mismatch — **opt-in, off by default** |
 | `≥0x80` | vendor | any | Ignored by core; application-defined |
+
+> **`OPSET_HASH` / `IO_HASH` are opt-in.** They enforce only if the firmware sets
+> `TMD_FIRMWARE_OPSET_HASH` / `TMD_ENFORCE_IO_HASH` (both default off). The current
+> core check is strict equality (reject on any mismatch). The roadmap reframes this
+> toward *accept within a declared capability envelope* (op-set ⊆ linked set, I/O
+> compatible — reject only on overflow); see
+> [docs/capability-envelope.md](docs/capability-envelope.md). That envelope-accept
+> logic ships today in the reference example; moving it into the core guardrail is
+> a roadmap item.
 
 ### Chunk header (`tmd_chunk_hdr_t`)
 
