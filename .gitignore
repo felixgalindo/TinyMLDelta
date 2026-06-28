@@ -76,6 +76,8 @@ demo_apply
 patch_applier
 */demo_apply
 */patch_applier
+examples/capability_envelope/envelope_demo
+examples/io_schema/schema_demo
 
 # Build folders
 build/
