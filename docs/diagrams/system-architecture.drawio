@@ -1,0 +1,62 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram name="System Architecture" id="tmd-arch">
+    <mxGraphModel dx="900" dy="700" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="680" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Zone bands (drawn first so they sit behind) -->
+        <mxCell id="zonePC" value="PC / CI   (off-device, stateless)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f7fa;strokeColor=#9fb3c8;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=2;fontColor=#486581;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="760" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="zoneMCU" value="MCU / Device   (on-device · core ~2 KB · ~1 KB apply RAM)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f0fff4;strokeColor=#7bc99a;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=2;fontColor=#2f855a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="330" width="760" height="320" as="geometry" />
+        </mxCell>
+
+        <!-- PC band -->
+        <mxCell id="base" value="base.tflite" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#3b82f6;" vertex="1" parent="1">
+          <mxGeometry x="80" y="95" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="target" value="target.tflite" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#3b82f6;" vertex="1" parent="1">
+          <mxGeometry x="80" y="155" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="patchgen" value="PatchGen (Python)&#10;byte / COPY-ADD diff&#10;+ TLV metadata" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bfdbfe;strokeColor=#2563eb;" vertex="1" parent="1">
+          <mxGeometry x="330" y="105" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="tmd" value="patch.tmd" style="shape=note;whiteSpace=wrap;html=1;fillColor=#fde68a;strokeColor=#d97706;" vertex="1" parent="1">
+          <mxGeometry x="620" y="115" width="140" height="56" as="geometry" />
+        </mxCell>
+
+        <!-- Transit band (between zones) -->
+        <mxCell id="transport" value="OTA transport — BLE / LoRa / Wi-Fi / ADB" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f3f4f6;strokeColor=#6b7280;" vertex="1" parent="1">
+          <mxGeometry x="560" y="250" width="200" height="46" as="geometry" />
+        </mxCell>
+
+        <!-- MCU band -->
+        <mxCell id="core" value="TinyMLDelta Core (C)&#10;parse · guardrails · apply · verify · atomic flip" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbf7d0;strokeColor=#16a34a;" vertex="1" parent="1">
+          <mxGeometry x="300" y="370" width="340" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="slotA" value="Slot A&#10;(active model)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#86efac;strokeColor=#15803d;" vertex="1" parent="1">
+          <mxGeometry x="240" y="480" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="slotB" value="Slot B&#10;(inactive / target)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d1fae5;strokeColor=#15803d;" vertex="1" parent="1">
+          <mxGeometry x="550" y="480" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="infer" value="Inference engine (TFLM / TFLite C / EI)&#10;reads weights from flash · arena in RAM" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfdf5;strokeColor=#10b981;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="300" y="575" width="340" height="56" as="geometry" />
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;html=1;" edge="1" parent="1" source="base" target="patchgen"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;html=1;" edge="1" parent="1" source="target" target="patchgen"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;html=1;" edge="1" parent="1" source="patchgen" target="tmd"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;html=1;" edge="1" parent="1" source="tmd" target="transport"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;html=1;" edge="1" parent="1" source="transport" target="core"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" value="read" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;html=1;dashed=1;" edge="1" parent="1" source="slotA" target="core"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="write" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;html=1;" edge="1" parent="1" source="core" target="slotB"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" value="atomic flip" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;html=1;dashed=1;strokeColor=#15803d;" edge="1" parent="1" source="slotB" target="slotA"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" value="active slot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;html=1;dashed=1;" edge="1" parent="1" source="slotA" target="infer"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

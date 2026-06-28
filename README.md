@@ -84,6 +84,8 @@ TEMP 32.50 C  score=0.0600  *** ANOMALY ***
 
 ## On the roadmap
 
+- **Architecture updates** via a COPY/ADD patch format + a provisioned
+  *capability envelope* — see [docs/capability-envelope.md](docs/capability-envelope.md)
 - SHA-256 and AES-CMAC signatures
 - Model versioning TLVs
 - Zephyr RTOS port
