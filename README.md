@@ -57,6 +57,15 @@ TEMP 25.14 C  score=0.0166
 TEMP 32.50 C  score=0.0600  *** ANOMALY ***
 ```
 
+### Benchmarks
+
+Reproducible patch-size benchmarks across **compression backends**
+(RAW / RLE / LZ4 / bsdiff) and **model formats** (TFLite / ONNX / flat) — committed
+results and tables in **[`bench/README.md`](bench/README.md)** (snapshot CSV:
+[`bench/sample_results.csv`](bench/sample_results.csv)). Highlights: RLE/LZ4 reach
+**0.2–0.4%** on repetitive (quant-churn) updates, the best backend depends on the
+update type, and bsdiff is smallest but **not MCU-deployable**.
+
 ---
 
 ## What it solves
