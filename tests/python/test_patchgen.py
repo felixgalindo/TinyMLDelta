@@ -1,5 +1,6 @@
 """Unit tests for PatchGen internals (diff, RLE, chunk splitting)."""
 import importlib
+import struct
 
 import pytest
 
@@ -78,3 +79,23 @@ def test_large_region_does_not_exceed_uint16(make_patch):
         target[i] = 0xAB
     patch = make_patch(base, bytes(target))   # would raise if patchgen crashed
     assert len(patch) > 0
+
+
+# --- atomic / validated write --------------------------------------------- #
+
+def test_patch_file_self_consistent_and_no_temp_left(make_patch, tmp_path):
+    """The written patch re-parses exactly, and no .tmp file is left behind."""
+    base = bytes(3000)
+    target = bytearray(base)
+    for i in range(100, 2900):
+        target[i] = 0xCD
+    patch = make_patch(base, bytes(target))
+
+    hs = struct.calcsize(pg.HDR_FMT)
+    chunks_n = struct.unpack(pg.HDR_FMT, patch[:hs])[2]
+
+    p = tmp_path / "verify.tmd"
+    p.write_bytes(patch)
+    pg.validate_patch_file(str(p), chunks_n)   # raises on any inconsistency
+
+    assert not list(tmp_path.glob("*.tmp"))    # atomic replace cleaned up

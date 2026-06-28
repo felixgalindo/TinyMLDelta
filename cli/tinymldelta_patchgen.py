@@ -41,6 +41,7 @@ Manual metadata overrides (take precedence over auto-meta):
 """
 
 import argparse
+import os
 import struct
 import zlib
 from typing import Optional
@@ -199,6 +200,37 @@ def tlv(tag: int, payload: bytes) -> bytes:
 # --------------------------------------------------------------------------- #
 #                         Debug / header inspection                           #
 # --------------------------------------------------------------------------- #
+
+def validate_patch_file(path: str, expected_chunks: int) -> None:
+    """Re-parse a written patch and confirm it is internally consistent.
+
+    Walks the header + chunk records and checks that the declared chunk count
+    matches what is present and that the file is consumed exactly (no short or
+    trailing bytes). Raises ValueError on any inconsistency.
+    """
+    with open(path, "rb") as f:
+        buf = f.read()
+    hs = struct.calcsize(HDR_FMT)
+    if len(buf) < hs:
+        raise ValueError("patch shorter than header")
+    (_v, algo, chunks_n, _bl, _tl, _bc, _tc, meta_len, _fl) = struct.unpack(
+        HDR_FMT, buf[:hs]
+    )
+    if chunks_n != expected_chunks:
+        raise ValueError(f"header chunks_n={chunks_n} != written {expected_chunks}")
+    has_crc = 1 if algo == ALGO_CRC32 else 0
+    pos = hs + meta_len
+    cs = struct.calcsize(CHUNK_FMT)
+    for i in range(chunks_n):
+        if pos + cs > len(buf):
+            raise ValueError(f"truncated chunk header at idx {i}")
+        _off, ln, _enc, _hc = struct.unpack(CHUNK_FMT, buf[pos:pos + cs])
+        pos += cs + (4 if has_crc else 0) + ln
+        if pos > len(buf):
+            raise ValueError(f"truncated chunk payload at idx {i}")
+    if pos != len(buf):
+        raise ValueError(f"trailing bytes after chunks ({len(buf) - pos})")
+
 
 def debug_print_patch_header(path: str) -> None:
     """Read and pretty-print the TinyMLDelta patch header.
@@ -410,29 +442,43 @@ def main() -> None:
                 data = seg
             chunks.append((off + s, enc, data))
 
-    # 9) Write final patch
-    with open(args.out, "wb") as out:
-        hdr = struct.pack(
-            HDR_FMT,
-            v,
-            algo,
-            len(chunks),
-            len(base),
-            len(target),
-            base_chk,
-            tgt_chk,
-            meta_len,
-            flags,
-        )
-        out.write(hdr)
-        if meta_len:
-            out.write(meta)
-        for off, enc, data in chunks:
-            chdr = struct.pack(CHUNK_FMT, off, len(data), enc, chunk_has_crc)
-            out.write(chdr)
-            if chunk_has_crc:
-                out.write(struct.pack("<I", zlib.crc32(data) & 0xFFFFFFFF))
-            out.write(data)
+    # 9) Write final patch atomically: build into a temp file, validate it
+    #    re-parses cleanly, then os.replace() onto the destination. A crash or
+    #    encoding error never leaves a truncated/corrupt patch at args.out.
+    tmp_out = args.out + ".tmp"
+    try:
+        with open(tmp_out, "wb") as out:
+            hdr = struct.pack(
+                HDR_FMT,
+                v,
+                algo,
+                len(chunks),
+                len(base),
+                len(target),
+                base_chk,
+                tgt_chk,
+                meta_len,
+                flags,
+            )
+            out.write(hdr)
+            if meta_len:
+                out.write(meta)
+            for off, enc, data in chunks:
+                if len(data) > MAX_CHUNK_LEN:
+                    raise ValueError(
+                        f"chunk payload {len(data)} exceeds {MAX_CHUNK_LEN}"
+                    )
+                chdr = struct.pack(CHUNK_FMT, off, len(data), enc, chunk_has_crc)
+                out.write(chdr)
+                if chunk_has_crc:
+                    out.write(struct.pack("<I", zlib.crc32(data) & 0xFFFFFFFF))
+                out.write(data)
+        validate_patch_file(tmp_out, expected_chunks=len(chunks))
+        os.replace(tmp_out, args.out)
+    except BaseException:
+        if os.path.exists(tmp_out):
+            os.remove(tmp_out)
+        raise
 
     print(f"TinyMLDelta patch written: {args.out}")
     print(
