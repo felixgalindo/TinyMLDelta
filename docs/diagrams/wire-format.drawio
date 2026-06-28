@@ -1,0 +1,45 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram name="Wire Format" id="tmd-wire">
+    <mxGraphModel dx="900" dy="650" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="820" pageHeight="430" math="0" shadow="0">
+      <root>
+        <mxCell id="0" /><mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="A .tmd patch = header + TLV metadata + chunk records (little-endian)" style="text;html=1;align=left;fontStyle=2;fontColor=#475569;" vertex="1" parent="1"><mxGeometry x="40" y="10" width="640" height="24" as="geometry"/></mxCell>
+
+        <!-- Left: top-level layout (stacked) -->
+        <mxCell id="p_hdr" value="Header (tmd_hdr_t, 78 B)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;" vertex="1" parent="1"><mxGeometry x="40" y="60" width="210" height="44" as="geometry"/></mxCell>
+        <mxCell id="p_meta" value="Metadata TLVs (meta_len B)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#ca8a04;" vertex="1" parent="1"><mxGeometry x="40" y="116" width="210" height="44" as="geometry"/></mxCell>
+        <mxCell id="p_c0" value="Chunk 0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;" vertex="1" parent="1"><mxGeometry x="40" y="172" width="210" height="36" as="geometry"/></mxCell>
+        <mxCell id="p_c1" value="Chunk 1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;" vertex="1" parent="1"><mxGeometry x="40" y="220" width="210" height="36" as="geometry"/></mxCell>
+        <mxCell id="p_cn" value="… (chunks_n records total)" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=#f0fdf4;strokeColor=#16a34a;" vertex="1" parent="1"><mxGeometry x="40" y="268" width="210" height="32" as="geometry"/></mxCell>
+
+        <!-- Right top: header fields -->
+        <mxCell id="hf_t" value="tmd_hdr_t fields" style="text;html=1;fontStyle=2;fontColor=#1e3a8a;align=left;" vertex="1" parent="1"><mxGeometry x="330" y="44" width="200" height="20" as="geometry"/></mxCell>
+        <mxCell id="hf1" value="v (u8) · algo (u8) · chunks_n (u16)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eff6ff;strokeColor=#60a5fa;" vertex="1" parent="1"><mxGeometry x="330" y="66" width="300" height="24" as="geometry"/></mxCell>
+        <mxCell id="hf2" value="base_len (u32) · target_len (u32)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eff6ff;strokeColor=#60a5fa;" vertex="1" parent="1"><mxGeometry x="330" y="92" width="300" height="24" as="geometry"/></mxCell>
+        <mxCell id="hf3" value="base_chk[32] · target_chk[32] (digests)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eff6ff;strokeColor=#60a5fa;" vertex="1" parent="1"><mxGeometry x="330" y="118" width="300" height="24" as="geometry"/></mxCell>
+        <mxCell id="hf4" value="meta_len (u16) · flags (u16)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eff6ff;strokeColor=#60a5fa;" vertex="1" parent="1"><mxGeometry x="330" y="144" width="300" height="24" as="geometry"/></mxCell>
+
+        <!-- Right middle: TLV detail -->
+        <mxCell id="tlv" value="TLV: [tag u8][len u8][value…]  —  REQ_ARENA · TFLM_ABI · OPSET_HASH · IO_HASH · vendor(≥0x80)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fefce8;strokeColor=#ca8a04;" vertex="1" parent="1"><mxGeometry x="330" y="184" width="450" height="34" as="geometry"/></mxCell>
+
+        <!-- Right bottom: chunk record detail -->
+        <mxCell id="cr_t" value="tmd_chunk_hdr_t (8 B) + optional CRC + payload" style="text;html=1;fontStyle=2;fontColor=#166534;align=left;" vertex="1" parent="1"><mxGeometry x="330" y="236" width="320" height="20" as="geometry"/></mxCell>
+        <mxCell id="cr1" value="off (u32) · len (u16) · enc (u8: RAW/RLE) · has_crc (u8)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;" vertex="1" parent="1"><mxGeometry x="330" y="258" width="360" height="24" as="geometry"/></mxCell>
+        <mxCell id="cr2" value="[optional CRC32 (4 B)]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;" vertex="1" parent="1"><mxGeometry x="330" y="284" width="200" height="24" as="geometry"/></mxCell>
+        <mxCell id="cr3" value="payload — RAW, or RLE [count][byte]; ≤ 64 KB encoded" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;" vertex="1" parent="1"><mxGeometry x="330" y="310" width="360" height="24" as="geometry"/></mxCell>
+
+        <!-- expand connectors -->
+        <mxCell id="x1" style="endArrow=open;html=1;dashed=1;strokeColor=#2563eb;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="p_hdr" target="hf1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="x2" style="endArrow=open;html=1;dashed=1;strokeColor=#ca8a04;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="p_meta" target="tlv"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="x3" style="endArrow=open;html=1;dashed=1;strokeColor=#16a34a;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="p_c0" target="cr1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- stacked flow -->
+        <mxCell id="f1" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="p_hdr" target="p_meta"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f2" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="p_meta" target="p_c0"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f3" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="p_c0" target="p_c1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f4" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="p_c1" target="p_cn"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
