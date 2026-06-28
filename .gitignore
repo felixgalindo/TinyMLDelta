@@ -10,7 +10,7 @@ Thumbs.db
 # VSCode
 .vscode/
 
-# Claude Code
+# Local agent / editor config
 .claude/
 
 # CLion / JetBrains
@@ -46,6 +46,10 @@ examples/modelgen/target.tflite
 
 # Generated TinyMLDelta patch files
 *.tmd
+
+# Benchmark generated outputs (CSV/logs/models)
+bench/results/
+bench/*.tflite
 
 # TensorFlow SavedModel staging dirs
 saved_model/
@@ -122,7 +126,8 @@ examples/UnoQ_TinyMLDeltaDemo/model_config.json
 
 # TFLite shared library (auto-downloaded by deploy_service.sh)
 examples/UnoQ_TinyMLDeltaDemo/tflite/libtensorflowlite_c.so
-paper/tinymldelta.aux
-paper/tinymldelta.out
-paper/tinymldelta.pdf
-paper/tinymldelta.tex
+
+# -------------------------------
+# Personal research material — never publish (public repo)
+# -------------------------------
+private-research/
