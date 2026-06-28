@@ -44,6 +44,42 @@ def _lz4_block_decode(src: bytes) -> bytes:
     return bytes(out)
 
 
+def _apply_copyadd(base, patch, nch, tlen, mlen, has_crc) -> bytes:
+    """Apply a COPY/ADD opcode-stream patch (mirrors the C runtime)."""
+    out = bytearray()
+    p = _HS + mlen
+    for _ in range(nch):
+        op = patch[p]
+        p += 1
+        if op == 1:  # COPY src_off,len from base
+            src, length = struct.unpack("<II", patch[p:p + 8])
+            p += 8
+            out += base[src:src + length]
+        else:        # ADD enc,len [crc] data
+            enc, length = struct.unpack("<BI", patch[p:p + 5])
+            p += 5
+            crc = None
+            if has_crc:
+                crc = struct.unpack("<I", patch[p:p + 4])[0]
+                p += 4
+            data = patch[p:p + length]
+            p += length
+            if crc is not None and (zlib.crc32(data) & 0xFFFFFFFF) != crc:
+                raise ValueError("ADD CRC mismatch")
+            if enc == 1:  # RLE
+                dec = bytearray()
+                i = 0
+                while i < len(data):
+                    count = data[i] or 256
+                    dec += bytes([data[i + 1]]) * count
+                    i += 2
+                data = bytes(dec)
+            out += data
+    if len(out) != tlen:
+        raise ValueError(f"COPY/ADD produced {len(out)} != target_len {tlen}")
+    return bytes(out)
+
+
 def apply_patch(base: bytes, patch: bytes) -> bytes:
     """Apply a .tmd patch to `base` and return the reconstructed target bytes."""
     v, algo, nch, blen, tlen, _bchk, _tchk, mlen, _flags = struct.unpack(
@@ -53,6 +89,9 @@ def apply_patch(base: bytes, patch: bytes) -> bytes:
         raise ValueError(f"unsupported version {v}")
     if len(base) != blen:
         raise ValueError(f"base length {len(base)} != header base_len {blen}")
+
+    if _flags & 0x0001:  # FLAG_COPYADD: opcode stream, not positional chunks
+        return _apply_copyadd(base, patch, nch, tlen, mlen, algo == 1)
 
     out = bytearray(base)
     if tlen > len(out):

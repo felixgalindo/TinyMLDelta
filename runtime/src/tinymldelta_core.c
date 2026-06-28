@@ -152,6 +152,84 @@ static int tmd_lz4_block_decode(const uint8_t* src, uint32_t srclen,
 }
 #endif /* TMD_FEAT_LZ4TINY */
 
+#if TMD_FEAT_COPYADD
+static uint32_t tmd_rd_u32(const uint8_t* p) {
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+         ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+/**
+ * @brief Apply a COPY/ADD opcode stream, building the inactive slot from
+ *        cursor 0 (no slot pre-copy needed).
+ *
+ * COPY runs stream from the active slot; ADD runs are RAW literals from the
+ * patch. A/B atomicity keeps the active slot valid; on power loss the build
+ * simply restarts (no journal in this mode).
+ */
+static tmd_status_t tmd_apply_copyadd(const tmd_ports_t* P,
+                                      const uint8_t* patch, size_t patch_len,
+                                      const tmd_hdr_t* hdr, size_t off,
+                                      const tmd_slot_t* slot_src,
+                                      const tmd_slot_t* slot_dst) {
+  uint8_t scratch[TMD_SCRATCH_SZ];
+  uint32_t cursor = 0;
+  uint8_t has_crc = (hdr->algo == 1);
+
+  for (uint32_t i = 0; i < hdr->chunks_n; ++i) {
+    if (off + 1 > patch_len) return TMD_STATUS_ERR_HDR;
+    uint8_t op = patch[off++];
+
+    if (op == TMD_OP_COPY) {
+      if (off + 8 > patch_len) return TMD_STATUS_ERR_HDR;
+      uint32_t src = tmd_rd_u32(patch + off);
+      uint32_t len = tmd_rd_u32(patch + off + 4);
+      off += 8;
+      if ((uint64_t)src + len > slot_src->size ||
+          (uint64_t)cursor + len > slot_dst->size) return TMD_STATUS_ERR_PARAM;
+      while (len > 0) {
+        uint32_t n = (len > TMD_SCRATCH_SZ) ? TMD_SCRATCH_SZ : len;
+        if (!P->flash_read(slot_src->addr + src, scratch, n)) return TMD_STATUS_ERR_FLASH;
+        if (!P->flash_write(slot_dst->addr + cursor, scratch, n)) return TMD_STATUS_ERR_FLASH;
+        src += n; cursor += n; len -= n;
+      }
+    } else if (op == TMD_OP_ADD) {
+      if (off + 5 > patch_len) return TMD_STATUS_ERR_HDR;
+      uint8_t enc = patch[off];
+      uint32_t len = tmd_rd_u32(patch + off + 1);
+      off += 5;
+      uint32_t crc_val = 0;
+      if (has_crc) {
+        if (off + 4 > patch_len) return TMD_STATUS_ERR_HDR;
+        crc_val = tmd_rd_u32(patch + off);
+        off += 4;
+      }
+      if (off + len > patch_len) return TMD_STATUS_ERR_HDR;
+      const uint8_t* data = patch + off;
+      off += len;
+#if TMD_FEAT_CRC32
+      if (has_crc && P->crc32 && P->crc32(data, len) != crc_val)
+        return TMD_STATUS_ERR_INTEGRITY;
+#else
+      (void)crc_val;
+#endif
+      if (enc != 0) return TMD_STATUS_ERR_UNSUPPORTED;  /* ADD payloads are RAW */
+      if ((uint64_t)cursor + len > slot_dst->size) return TMD_STATUS_ERR_PARAM;
+      if (!P->flash_write(slot_dst->addr + cursor, data, len)) return TMD_STATUS_ERR_FLASH;
+      cursor += len;
+    } else {
+      return TMD_STATUS_ERR_UNSUPPORTED;
+    }
+  }
+
+  if (cursor != hdr->target_len) {
+    TMD_LOG("TinyMLDelta: COPY/ADD cursor %lu != target_len %lu\n",
+            (unsigned long)cursor, (unsigned long)hdr->target_len);
+    return TMD_STATUS_ERR_INTERNAL;
+  }
+  return TMD_STATUS_OK;
+}
+#endif /* TMD_FEAT_COPYADD */
+
 /**
  * @brief Parse metadata TLV block from the patch header.
  *
@@ -465,6 +543,24 @@ tmd_status_t tmd_apply_patch_from_memory(const uint8_t* patch, size_t patch_len)
             (unsigned long)slot_src->size,
             (unsigned long)slot_dst->size);
     return TMD_STATUS_ERR_PARAM;
+  }
+
+  /* COPY/ADD opcode-stream patches build the inactive slot fresh (no copy). */
+  if (hdr->flags & TMD_FLAG_COPYADD) {
+#if TMD_FEAT_COPYADD
+    st = tmd_apply_copyadd(P, patch, patch_len, hdr, off, slot_src, slot_dst);
+    if (st != TMD_STATUS_OK) {
+      TMD_LOG("TinyMLDelta: COPY/ADD apply failed (%d)\n", (int)st);
+      return st;
+    }
+    if (!P->set_active_slot(inactive)) return TMD_STATUS_ERR_FLASH;
+    TMD_LOG("TinyMLDelta: COPY/ADD applied OK, new active slot=%u\n",
+            (unsigned)inactive);
+    return TMD_STATUS_OK;
+#else
+    TMD_LOG("TinyMLDelta: COPY/ADD patch but TMD_FEAT_COPYADD disabled\n");
+    return TMD_STATUS_ERR_UNSUPPORTED;
+#endif
   }
 
   /* Copy active slot to inactive slot. */

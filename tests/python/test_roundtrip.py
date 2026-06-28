@@ -71,6 +71,29 @@ def test_roundtrip_lz4(make_patch):
     assert apply_patch(base, patch) == target
 
 
+def test_roundtrip_copyadd_basic(make_patch):
+    """COPY/ADD reconstructs a same-length weight-style update byte-exact."""
+    base = _rand(8000, 13)
+    target = bytearray(base)
+    rng = random.Random(14)
+    for _ in range(60):
+        target[rng.randrange(len(target))] ^= 0xFF
+    target = bytes(target)
+    patch = make_patch(base, target, extra=["--copy-add"])
+    assert apply_patch(base, patch) == target
+
+
+def test_roundtrip_copyadd_offset_shift(make_patch):
+    """A mid-stream INSERT cascades offsets: positional byte-diff explodes, but
+    COPY/ADD stays tiny (and still reconstructs byte-exact)."""
+    base = _rand(20000, 11)
+    target = base[:8000] + _rand(100, 12) + base[8000:]   # insert -> shift
+    ca = make_patch(base, target, extra=["--copy-add"])
+    assert apply_patch(base, ca) == target
+    positional = make_patch(base, target)
+    assert len(ca) < len(positional) / 5                  # structure-aware wins big
+
+
 def test_roundtrip_many_sizes(make_patch):
     for seed in range(8):
         n = 500 + seed * 1500

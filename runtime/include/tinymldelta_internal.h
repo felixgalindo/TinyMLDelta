@@ -148,6 +148,15 @@ enum {
   TMD_META_VENDOR_BEGIN    = 0x80,
 };
 
+/* Header `flags` bits. */
+#define TMD_FLAG_COPYADD  0x0001  /**< body is a COPY/ADD opcode stream */
+
+/* COPY/ADD opcodes (when TMD_FLAG_COPYADD is set):
+ *   OP_ADD : [u8=0][enc u8][len u32][crc u32?][data...]  write decoded at cursor
+ *   OP_COPY: [u8=1][src_off u32][len u32]                copy from active slot   */
+#define TMD_OP_ADD   0
+#define TMD_OP_COPY  1
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

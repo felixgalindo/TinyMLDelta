@@ -72,6 +72,12 @@ ENC_RAW = 0
 ENC_RLE = 1  # [count][byte], count 0 => 256
 ENC_LZ4 = 2  # raw LZ4 block (device needs TMD_FEAT_LZ4TINY)
 
+# Header flag bit: the patch body is a COPY/ADD opcode stream (structure-aware,
+# serialization-reshuffle-robust) instead of positional overwrite chunks.
+FLAG_COPYADD = 0x0001
+OP_ADD = 0   # [op u8=0][enc u8][len u32][crc u32?][data...]  -> write decoded at cursor
+OP_COPY = 1  # [op u8=1][src_off u32][len u32]                -> copy from active slot
+
 #: Max encoded payload per chunk. The chunk `len` field is uint16, so a single
 #: chunk payload may not exceed this. Larger diff regions are split.
 MAX_CHUNK_LEN = 0xFFFF  # 65535
@@ -181,6 +187,88 @@ def find_diffs(base: bytes, target: bytes, merge_gap: int = 16):
         else:
             merged.append([off, data])
     return [(off, bytes(data)) for off, data in merged]
+
+
+def build_copyadd_ops(base: bytes, target: bytes, min_copy: int = 16, k: int = 8):
+    """Greedy COPY/ADD edit script reconstructing `target` from `base`.
+
+    Emits ("COPY", src_off, length) runs taken from `base` and ("ADD", bytes)
+    literal runs. Robust to serialization offset shifts: a shifted-but-identical
+    region becomes a single large COPY instead of a ~100% byte diff.
+    """
+    index = {}
+    for i in range(len(base) - k + 1):       # first position of each k-gram
+        kg = base[i:i + k]
+        if kg not in index:
+            index[kg] = i
+
+    ops = []
+    lit = bytearray()
+    i, n = 0, len(target)
+    while i < n:
+        m_off, m_len = -1, 0
+        if i + k <= n:
+            cand = index.get(target[i:i + k])
+            if cand is not None:
+                j = 0
+                lim = min(n - i, len(base) - cand)
+                while j < lim and target[i + j] == base[cand + j]:
+                    j += 1
+                if j >= min_copy:
+                    m_off, m_len = cand, j
+        if m_len >= min_copy:
+            if lit:
+                ops.append(("ADD", bytes(lit)))
+                lit = bytearray()
+            ops.append(("COPY", m_off, m_len))
+            i += m_len
+        else:
+            lit.append(target[i])
+            i += 1
+    if lit:
+        ops.append(("ADD", bytes(lit)))
+    return ops
+
+
+def write_copyadd_patch(out_path: str, base: bytes, target: bytes,
+                        algo: str, min_copy: int = 16):
+    """Write a COPY/ADD opcode-stream patch atomically. Returns the op list."""
+    ops = build_copyadd_ops(base, target, min_copy=min_copy)
+    if len(ops) > 0xFFFF:
+        raise ValueError(f"too many ops ({len(ops)}); chunks_n is u16")
+
+    if algo == "crc32":
+        algo_v, has_crc = ALGO_CRC32, 1
+        base_chk = struct.pack("<I", zlib.crc32(base) & 0xFFFFFFFF) + b"\x00" * 28
+        tgt_chk = struct.pack("<I", zlib.crc32(target) & 0xFFFFFFFF) + b"\x00" * 28
+    else:
+        algo_v, has_crc = ALGO_NONE, 0
+        base_chk = tgt_chk = b"\x00" * 32
+
+    tmp = out_path + ".tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(struct.pack(HDR_FMT, 1, algo_v, len(ops), len(base),
+                                len(target), base_chk, tgt_chk, 0, FLAG_COPYADD))
+            for op in ops:
+                if op[0] == "COPY":
+                    _, src, length = op
+                    f.write(struct.pack("<BII", OP_COPY, src, length))
+                else:
+                    # ADD ships the genuinely-changed bytes verbatim (RAW). The
+                    # COPY ops carry the compression; literals are usually
+                    # high-entropy, so RAW keeps the device decoder trivial.
+                    raw = op[1]
+                    f.write(struct.pack("<BBI", OP_ADD, ENC_RAW, len(raw)))
+                    if has_crc:
+                        f.write(struct.pack("<I", zlib.crc32(raw) & 0xFFFFFFFF))
+                    f.write(raw)
+        os.replace(tmp, out_path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+    return ops
 
 
 # --------------------------------------------------------------------------- #
@@ -314,6 +402,12 @@ def main() -> None:
         help="merge diffs closer than this many bytes",
     )
     ap.add_argument(
+        "--copy-add",
+        action="store_true",
+        help="emit a COPY/ADD opcode stream (structure-aware; handles offset "
+             "shifts/growth; device needs TMD_FEAT_COPYADD)",
+    )
+    ap.add_argument(
         "--lz4",
         action="store_true",
         help="enable LZ4 chunk encoding (device needs TMD_FEAT_LZ4TINY)",
@@ -377,6 +471,16 @@ def main() -> None:
         base = f.read()
     with open(args.target, "rb") as f:
         target = f.read()
+
+    # 1b) COPY/ADD opcode-stream mode (structure-aware) is a separate write path.
+    if args.copy_add:
+        ops = write_copyadd_patch(args.out, base, target, args.algo)
+        n_copy = sum(1 for o in ops if o[0] == "COPY")
+        n_add = len(ops) - n_copy
+        print(f"TinyMLDelta COPY/ADD patch written: {args.out}")
+        print(f"Ops: {len(ops)}  (COPY={n_copy}, ADD={n_add})")
+        debug_print_patch_header(args.out)
+        return
 
     # 2) Compute raw diffs
     diffs = find_diffs(base, target, merge_gap=args.merge_gap)

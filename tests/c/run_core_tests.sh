@@ -27,7 +27,7 @@ fi
 INC="-I$ROOT/runtime/include -I$ROOT/examples/UnoQ_TinyMLDeltaDemo/common"
 
 echo "[build] compiling core + harness"
-$CC $CFLAGS -DTMD_FEAT_LZ4TINY=1 $INC -c "$ROOT/runtime/src/tinymldelta_core.c" -o "$WORK/core.o"
+$CC $CFLAGS -DTMD_FEAT_LZ4TINY=1 -DTMD_FEAT_COPYADD=1 $INC -c "$ROOT/runtime/src/tinymldelta_core.c" -o "$WORK/core.o"
 $CXX $CXXFLAGS $INC -c "$HERE/core_apply_harness.cpp" -o "$WORK/harness.o"
 $CXX $CXXFLAGS "$WORK/core.o" "$WORK/harness.o" -o "$WORK/core_apply"
 
@@ -59,6 +59,13 @@ elif kind == "lz4":
     target[1000:4500] = b"\x00"*3500
     target[5000:5800] = (b"ABCD"*200)[:800]
     base, target = bytes(base), bytes(target)
+elif kind == "copyadd_basic":
+    base = bytearray(rnd(8000, 8)); target = bytearray(base)
+    r2 = random.Random(15)
+    for _ in range(60): target[r2.randrange(len(target))] ^= 0xFF
+    base, target = bytes(base), bytes(target)
+elif kind == "copyadd_shift":
+    base = rnd(20000, 9); target = base[:8000] + rnd(100, 10) + base[8000:]
 else:
     raise SystemExit("unknown kind "+kind)
 open(bp,"wb").write(base); open(tp,"wb").write(target)
@@ -66,13 +73,16 @@ PY
 }
 
 PATCHGEN="$ROOT/cli/tinymldelta_patchgen.py"
-KINDS="identical scattered growth shrink rle large"
+KINDS="identical scattered growth shrink rle large copyadd_basic copyadd_shift"
 if "$PY" -c "import lz4" >/dev/null 2>&1; then KINDS="$KINDS lz4"; fi
 fail=0
 for kind in $KINDS; do
   gen "$kind" "$WORK/base.bin" "$WORK/target.bin"
-  EXTRA=""
-  [ "$kind" = lz4 ] && EXTRA="--lz4 --lz4-window 4096"
+  case "$kind" in
+    lz4)        EXTRA="--lz4 --lz4-window 4096" ;;
+    copyadd_*)  EXTRA="--copy-add" ;;
+    *)          EXTRA="" ;;
+  esac
   "$PY" "$PATCHGEN" "$WORK/base.bin" "$WORK/target.bin" "$WORK/patch.tmd" --algo crc32 $EXTRA >/dev/null
   ${RUNNER:-} "$WORK/core_apply" "$WORK/base.bin" "$WORK/patch.tmd" "$WORK/out.bin" "$SLOT"
   if cmp -s "$WORK/out.bin" "$WORK/target.bin"; then

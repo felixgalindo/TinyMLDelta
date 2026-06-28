@@ -73,6 +73,12 @@
 #define TMD_FEAT_LZ4TINY  0
 #endif
 
+/* COPY/ADD opcode-stream apply (structure-aware; handles serialization offset
+ * shifts and model growth). Opt-in; the positional chunk path is unaffected. */
+#ifndef TMD_FEAT_COPYADD
+#define TMD_FEAT_COPYADD  0
+#endif
+
 /* --------------------------------------------------------------------------
  *  Flash & Buffer Geometry
  * --------------------------------------------------------------------------

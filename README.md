@@ -81,11 +81,13 @@ TEMP 32.50 C  score=0.0600  *** ANOMALY ***
 - Arduino UNO Q (STM32U585 + Zephyr)
 - Edge Impulse SDK integration (external model loading)
 - RAW, RLE, and LZ4 chunk encoding (LZ4 via `--lz4`; device needs `TMD_FEAT_LZ4TINY`)
+- **COPY/ADD structure-aware patches** (`--copy-add`; device needs `TMD_FEAT_COPYADD`)
+  — robust to serialization offset shifts and model growth (architecture updates)
 
 ## On the roadmap
 
-- **Architecture updates** via a COPY/ADD patch format + a provisioned
-  *capability envelope* — see [docs/capability-envelope.md](docs/capability-envelope.md)
+- **Capability-envelope provisioning** for architecture updates (superset ops,
+  arena, slot, schema-flexible I/O) — see [docs/capability-envelope.md](docs/capability-envelope.md)
 - SHA-256 and AES-CMAC signatures
 - Model versioning TLVs
 - Zephyr RTOS port
