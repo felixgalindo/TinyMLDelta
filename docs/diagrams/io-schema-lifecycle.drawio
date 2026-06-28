@@ -1,0 +1,31 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram name="I/O Schema Lifecycle" id="tmd-ioschema">
+    <mxGraphModel dx="900" dy="700" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="640" pageHeight="560" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="Core carries the schema opaquely + gates by version; the app owns format &amp; semantics." style="text;html=1;fontStyle=2;fontColor=#475569;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="12" width="560" height="22" as="geometry"/></mxCell>
+
+        <mxCell id="s1" value="Model export — embed I/O schema in TFLite metadata&#10;(labels · normalization · task · threshold)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;" vertex="1" parent="1"><mxGeometry x="120" y="48" width="400" height="50" as="geometry"/></mxCell>
+        <mxCell id="s2" value="PatchGen — schema rides with the model bytes (or vendor TLV ≥ 0x80); core never parses it" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#ca8a04;" vertex="1" parent="1"><mxGeometry x="120" y="120" width="400" height="50" as="geometry"/></mxCell>
+        <mxCell id="s3" value="Device — apply patch, atomic A/B flip (schema swaps with the weights)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;" vertex="1" parent="1"><mxGeometry x="120" y="192" width="400" height="44" as="geometry"/></mxCell>
+
+        <mxCell id="appbar" value="App re-sync on apply" style="text;html=1;fontStyle=1;fontColor=#166534;align=left;" vertex="1" parent="1"><mxGeometry x="120" y="252" width="300" height="20" as="geometry"/></mxCell>
+        <mxCell id="a1" value="load schema → version check&#10;(reject if newer than app supports)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfdf5;strokeColor=#10b981;" vertex="1" parent="1"><mxGeometry x="120" y="276" width="400" height="44" as="geometry"/></mxCell>
+        <mxCell id="a2" value="validate vs live tensors&#10;(shape · dtype · quant · class count)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfdf5;strokeColor=#10b981;" vertex="1" parent="1"><mxGeometry x="120" y="332" width="400" height="44" as="geometry"/></mxCell>
+        <mxCell id="a3" value="pipeline can supply the input?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#ca8a04;" vertex="1" parent="1"><mxGeometry x="170" y="392" width="300" height="60" as="geometry"/></mxCell>
+
+        <mxCell id="ok" value="configure: labels · normalization · threshold → resume inference" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbf7d0;strokeColor=#15803d;" vertex="1" parent="1"><mxGeometry x="40" y="478" width="320" height="50" as="geometry"/></mxCell>
+        <mxCell id="rej" value="reject → keep old slot (A/B makes it safe)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef2f2;strokeColor=#dc2626;fontColor=#991b1b;" vertex="1" parent="1"><mxGeometry x="420" y="478" width="180" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="e1" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="s1" target="s2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="s2" target="s3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="s3" target="a1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="a1" target="a2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="a2" target="a3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" value="yes" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="a3" target="ok"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="no / any check fails" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;strokeColor=#dc2626;" edge="1" parent="1" source="a3" target="rej"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

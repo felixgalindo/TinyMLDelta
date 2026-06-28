@@ -1,0 +1,33 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram name="Capability Envelope" id="tmd-env">
+    <mxGraphModel dx="900" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="760" pageHeight="380" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="Provision the levers you want; each widens the envelope. Apps that don't need arch updates provision none." style="text;html=1;fontStyle=2;fontColor=#475569;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="12" width="690" height="22" as="geometry"/></mxCell>
+
+        <mxCell id="lh" value="Provision (firmware)" style="text;html=1;fontStyle=1;fontColor=#1e3a8a;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="42" width="260" height="20" as="geometry"/></mxCell>
+        <mxCell id="uh" value="Unlocks" style="text;html=1;fontStyle=1;fontColor=#166534;align=left;" vertex="1" parent="1"><mxGeometry x="430" y="42" width="300" height="20" as="geometry"/></mxCell>
+
+        <mxCell id="l1" value="Superset op resolver" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;" vertex="1" parent="1"><mxGeometry x="40" y="68" width="250" height="36" as="geometry"/></mxCell>
+        <mxCell id="u1" value="new operator types" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;" vertex="1" parent="1"><mxGeometry x="430" y="68" width="300" height="36" as="geometry"/></mxCell>
+
+        <mxCell id="l2" value="Over-sized arena" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;" vertex="1" parent="1"><mxGeometry x="40" y="116" width="250" height="36" as="geometry"/></mxCell>
+        <mxCell id="u2" value="wider / deeper / higher-res models" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;" vertex="1" parent="1"><mxGeometry x="430" y="116" width="300" height="36" as="geometry"/></mxCell>
+
+        <mxCell id="l3" value="Slot sized for largest model" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;" vertex="1" parent="1"><mxGeometry x="40" y="164" width="250" height="36" as="geometry"/></mxCell>
+        <mxCell id="u3" value="model growth (add layers / channels)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;" vertex="1" parent="1"><mxGeometry x="430" y="164" width="300" height="36" as="geometry"/></mxCell>
+
+        <mxCell id="l4" value="Schema-flexible I/O" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;" vertex="1" parent="1"><mxGeometry x="40" y="212" width="250" height="36" as="geometry"/></mxCell>
+        <mxCell id="u4" value="added classes · new input resolution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;" vertex="1" parent="1"><mxGeometry x="430" y="212" width="300" height="36" as="geometry"/></mxCell>
+
+        <mxCell id="out" value="Outside the envelope — new operator type · arena/slot overflow · I/O the sensor can't supply → requires a firmware OTA" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef2f2;strokeColor=#dc2626;fontColor=#991b1b;" vertex="1" parent="1"><mxGeometry x="40" y="284" width="690" height="44" as="geometry"/></mxCell>
+
+        <mxCell id="e1" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="l1" target="u1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="l2" target="u2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="l3" target="u3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="l4" target="u4"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

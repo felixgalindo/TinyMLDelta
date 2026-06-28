@@ -1,0 +1,29 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram name="COPY/ADD vs Overwrite" id="tmd-copyadd">
+    <mxGraphModel dx="900" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="820" pageHeight="320" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+
+        <mxCell id="lt" value="Positional overwrite (current)" style="text;html=1;fontStyle=1;fontColor=#9a3412;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="14" width="340" height="22" as="geometry"/></mxCell>
+        <mxCell id="l_base" value="base model bytes" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fee2e2;strokeColor=#ef4444;" vertex="1" parent="1"><mxGeometry x="40" y="46" width="320" height="32" as="geometry"/></mxCell>
+        <mxCell id="l_tgt" value="target (same length assumed)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fee2e2;strokeColor=#ef4444;" vertex="1" parent="1"><mxGeometry x="40" y="92" width="320" height="32" as="geometry"/></mxCell>
+        <mxCell id="l_op1" value="overwrite @off0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#f97316;" vertex="1" parent="1"><mxGeometry x="40" y="140" width="150" height="30" as="geometry"/></mxCell>
+        <mxCell id="l_op2" value="overwrite @off1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#f97316;" vertex="1" parent="1"><mxGeometry x="210" y="140" width="150" height="30" as="geometry"/></mxCell>
+        <mxCell id="l_note" value="✗ a buffer resize shifts every later offset → ~100% byte diff (and PatchGen used to overflow)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fef2f2;strokeColor=#dc2626;fontColor=#991b1b;" vertex="1" parent="1"><mxGeometry x="40" y="186" width="320" height="48" as="geometry"/></mxCell>
+
+        <mxCell id="rt" value="COPY / ADD opcode stream (proposed)" style="text;html=1;fontStyle=1;fontColor=#166534;align=left;" vertex="1" parent="1"><mxGeometry x="450" y="14" width="340" height="22" as="geometry"/></mxCell>
+        <mxCell id="r_op1" value="COPY  base[0 .. a]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;" vertex="1" parent="1"><mxGeometry x="450" y="46" width="320" height="30" as="geometry"/></mxCell>
+        <mxCell id="r_op2" value="ADD   new bytes (changed / inserted)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#ca8a04;" vertex="1" parent="1"><mxGeometry x="450" y="84" width="320" height="30" as="geometry"/></mxCell>
+        <mxCell id="r_op3" value="COPY  base[a .. n]  (same bytes, shifted)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;" vertex="1" parent="1"><mxGeometry x="450" y="122" width="320" height="30" as="geometry"/></mxCell>
+        <mxCell id="r_tgt" value="→ rebuild target in slot B, byte-exact" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#bbf7d0;strokeColor=#15803d;" vertex="1" parent="1"><mxGeometry x="450" y="166" width="320" height="30" as="geometry"/></mxCell>
+        <mxCell id="r_note" value="✓ shifts &amp; growth = cheap COPYs; device stays dumb (~1 KB RAM)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#16a34a;fontColor=#166534;" vertex="1" parent="1"><mxGeometry x="450" y="206" width="320" height="40" as="geometry"/></mxCell>
+
+        <mxCell id="le1" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;strokeColor=#ef4444;" edge="1" parent="1" source="l_op1" target="l_tgt"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="le2" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;strokeColor=#ef4444;" edge="1" parent="1" source="l_op2" target="l_tgt"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re1" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="r_op1" target="r_tgt"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re2" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="r_op2" target="r_tgt"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re3" style="endArrow=block;html=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="r_op3" target="r_tgt"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
