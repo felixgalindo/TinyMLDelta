@@ -70,10 +70,21 @@ ALGO_CRC32 = 1
 # Chunk encoding types (must match runtime enum)
 ENC_RAW = 0
 ENC_RLE = 1  # [count][byte], count 0 => 256
+ENC_LZ4 = 2  # raw LZ4 block (device needs TMD_FEAT_LZ4TINY)
 
 #: Max encoded payload per chunk. The chunk `len` field is uint16, so a single
 #: chunk payload may not exceed this. Larger diff regions are split.
 MAX_CHUNK_LEN = 0xFFFF  # 65535
+
+# Optional LZ4 block encoder (PatchGen side). The device decodes with its tiny
+# LZ4 decoder when TMD_FEAT_LZ4TINY is enabled. Absent -> LZ4 simply unavailable.
+try:
+    import lz4.block as _lz4block
+
+    def lz4_compress(data: bytes):
+        return _lz4block.compress(data, store_size=False)
+except Exception:  # pragma: no cover - optional dependency
+    lz4_compress = None
 
 # Metadata TLV tags (must match tinymldelta_internal.h)
 TMD_META_REQ_ARENA_BYTES = 0x01
@@ -303,6 +314,17 @@ def main() -> None:
         help="merge diffs closer than this many bytes",
     )
     ap.add_argument(
+        "--lz4",
+        action="store_true",
+        help="enable LZ4 chunk encoding (device needs TMD_FEAT_LZ4TINY)",
+    )
+    ap.add_argument(
+        "--lz4-window",
+        type=int,
+        default=4096,
+        help="max decoded bytes per LZ4 chunk (must be <= device TMD_LZ4_WINDOW)",
+    )
+    ap.add_argument(
         "--min-chunk",
         type=int,
         default=8,
@@ -429,17 +451,26 @@ def main() -> None:
     #    The chunk `len` field is uint16, so a single encoded payload may not
     #    exceed 65535 bytes. Split large diff regions into <=64 KB sub-chunks
     #    (each written contiguously at off + sub-offset) before encoding.
+    use_lz4 = args.lz4 and lz4_compress is not None
+    if args.lz4 and lz4_compress is None:
+        print("[TinyMLDelta] Warning: --lz4 requested but the lz4 package is "
+              "unavailable; falling back to RAW/RLE.")
+    # When LZ4 is on, split to the LZ4 window so each block fits the device's
+    # decode buffer; otherwise split to the uint16 chunk-length cap.
+    split_win = min(args.lz4_window, MAX_CHUNK_LEN) if use_lz4 else MAX_CHUNK_LEN
+
     chunks = []
     for off, raw in diffs:
-        for s in range(0, len(raw), MAX_CHUNK_LEN):
-            seg = raw[s:s + MAX_CHUNK_LEN]
+        for s in range(0, len(raw), split_win):
+            seg = raw[s:s + split_win]
+            enc, data = ENC_RAW, seg          # candidate: raw
             rle = rle_encode(seg)
-            if len(rle) < len(seg):
-                enc = ENC_RLE
-                data = rle
-            else:
-                enc = ENC_RAW
-                data = seg
+            if len(rle) < len(data):          # candidate: RLE
+                enc, data = ENC_RLE, rle
+            if use_lz4:                        # candidate: LZ4
+                lz = lz4_compress(seg)
+                if lz is not None and len(lz) < len(data) and len(lz) <= MAX_CHUNK_LEN:
+                    enc, data = ENC_LZ4, lz
             chunks.append((off + s, enc, data))
 
     # 9) Write final patch atomically: build into a temp file, validate it

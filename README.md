@@ -80,7 +80,7 @@ TEMP 32.50 C  score=0.0600  *** ANOMALY ***
 - Crash-safe journaling (power-loss recovery)
 - Arduino UNO Q (STM32U585 + Zephyr)
 - Edge Impulse SDK integration (external model loading)
-- RAW and RLE chunk encoding
+- RAW, RLE, and LZ4 chunk encoding (LZ4 via `--lz4`; device needs `TMD_FEAT_LZ4TINY`)
 
 ## On the roadmap
 

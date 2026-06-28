@@ -21,16 +21,16 @@ sys.path.insert(0, CLI_DIR)
 @pytest.fixture
 def make_patch(tmp_path):
     """Return a function (base_bytes, target_bytes) -> patch_bytes via PatchGen."""
-    def _make(base: bytes, target: bytes, algo: str = "crc32") -> bytes:
+    def _make(base: bytes, target: bytes, algo: str = "crc32", extra=None) -> bytes:
         bp = tmp_path / "base.bin"
         tp = tmp_path / "target.bin"
         pp = tmp_path / "patch.tmd"
         bp.write_bytes(base)
         tp.write_bytes(target)
-        res = subprocess.run(
-            [sys.executable, PATCHGEN, str(bp), str(tp), str(pp), "--algo", algo],
-            capture_output=True, text=True,
-        )
+        cmd = [sys.executable, PATCHGEN, str(bp), str(tp), str(pp), "--algo", algo]
+        if extra:
+            cmd += extra
+        res = subprocess.run(cmd, capture_output=True, text=True)
         assert res.returncode == 0, f"patchgen failed: {res.stderr}"
         return pp.read_bytes()
     return _make

@@ -84,6 +84,12 @@
 #ifndef TMD_SCRATCH_SZ
 #define TMD_SCRATCH_SZ    1024
 #endif
+/* LZ4 (TMD_FEAT_LZ4TINY) decode window: max decoded bytes per LZ4 chunk. Each
+ * LZ4 chunk is an independent block whose decoded size fits this buffer, so
+ * back-references stay in RAM (no flash reads). PatchGen must split to <= this. */
+#ifndef TMD_LZ4_WINDOW
+#define TMD_LZ4_WINDOW    4096
+#endif
 #ifndef TMD_ALIGN_WRITE
 #define TMD_ALIGN_WRITE   4
 #endif

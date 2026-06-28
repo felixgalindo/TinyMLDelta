@@ -38,6 +38,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
+      - run: python -m pip install lz4
       - name: Build + run under ASan/UBSan
         env:
           SAN_C: "-std=c99 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1"
@@ -59,6 +60,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: sudo apt-get update && sudo apt-get install -y valgrind
+      - run: python -m pip install lz4
       - name: Examples + core under valgrind
         env:
           RUNNER: "valgrind --error-exitcode=1 --leak-check=full --errors-for-leak-kinds=definite -q"
@@ -78,6 +80,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: sudo apt-get update && sudo apt-get install -y lcov
+      - run: python -m pip install lz4
       - name: Run core test with coverage instrumentation
         env:
           CFLAGS: "-std=c99 -O0 -g --coverage"

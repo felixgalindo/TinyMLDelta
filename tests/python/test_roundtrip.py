@@ -5,6 +5,8 @@ highly-compressible (RLE) diffs, and the >64 KB region case.
 """
 import random
 
+import pytest
+
 from applier import apply_patch
 
 
@@ -55,6 +57,18 @@ def test_roundtrip_large_region(make_patch):
         target[i] = 0xAB
     target = bytes(target)
     assert apply_patch(base, make_patch(base, target)) == target
+
+
+def test_roundtrip_lz4(make_patch):
+    """LZ4-encoded chunks reconstruct the target byte-exact."""
+    pytest.importorskip("lz4")            # PatchGen needs lz4 to encode
+    base = _rand(6000, 9)
+    target = bytearray(base)
+    target[1000:4500] = b"\x00" * 3500    # large compressible run (LZ4 matches)
+    target[5000:5800] = (b"ABCD" * 200)[:800]
+    target = bytes(target)
+    patch = make_patch(base, target, extra=["--lz4", "--lz4-window", "4096"])
+    assert apply_patch(base, patch) == target
 
 
 def test_roundtrip_many_sizes(make_patch):

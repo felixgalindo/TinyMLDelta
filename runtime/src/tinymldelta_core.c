@@ -110,6 +110,48 @@ static tmd_status_t tmd_rle_decode_write(const tmd_ports_t* P,
 }
 #endif /* TMD_FEAT_RLE */
 
+#if TMD_FEAT_LZ4TINY
+/**
+ * @brief Decode one LZ4 block (raw, no frame) into @p dst.
+ *
+ * Standard LZ4 block format: a sequence of [token][literals][offset][match].
+ * Back-references point within @p dst, so each PatchGen LZ4 chunk is an
+ * independent block sized <= dstcap (TMD_LZ4_WINDOW) — no flash reads needed.
+ *
+ * @return decoded byte count, or -1 on malformed input / overflow.
+ */
+static int tmd_lz4_block_decode(const uint8_t* src, uint32_t srclen,
+                                uint8_t* dst, uint32_t dstcap) {
+  uint32_t sp = 0, dp = 0;
+  while (sp < srclen) {
+    uint8_t token = src[sp++];
+    uint32_t litlen = token >> 4;
+    if (litlen == 15) {
+      uint8_t b;
+      do { if (sp >= srclen) return -1; b = src[sp++]; litlen += b; } while (b == 255);
+    }
+    if (sp + litlen > srclen || dp + litlen > dstcap) return -1;
+    for (uint32_t i = 0; i < litlen; ++i) dst[dp++] = src[sp++];
+    if (sp >= srclen) break;                  /* last sequence: literals only */
+
+    if (sp + 2 > srclen) return -1;
+    uint32_t offset = (uint32_t)src[sp] | ((uint32_t)src[sp + 1] << 8);
+    sp += 2;
+    if (offset == 0 || offset > dp) return -1;
+    uint32_t matchlen = token & 0x0F;
+    if (matchlen == 15) {
+      uint8_t b;
+      do { if (sp >= srclen) return -1; b = src[sp++]; matchlen += b; } while (b == 255);
+    }
+    matchlen += 4;                            /* LZ4 minmatch */
+    if (dp + matchlen > dstcap) return -1;
+    uint32_t mp = dp - offset;
+    for (uint32_t i = 0; i < matchlen; ++i) dst[dp++] = dst[mp++];  /* overlap ok */
+  }
+  return (int)dp;
+}
+#endif /* TMD_FEAT_LZ4TINY */
+
 /**
  * @brief Parse metadata TLV block from the patch header.
  *
@@ -544,6 +586,30 @@ tmd_status_t tmd_apply_patch_from_memory(const uint8_t* patch, size_t patch_len)
         TMD_LOG("TinyMLDelta: RLE decode/write failed idx=%lu\n",
                 (unsigned long)idx);
         return wst;
+      }
+#else
+      return TMD_STATUS_ERR_UNSUPPORTED;
+#endif
+    } else if (ch->enc == 2) { /* LZ4 block: decode into window, then flash */
+#if TMD_FEAT_LZ4TINY
+      static uint8_t lz4buf[TMD_LZ4_WINDOW];
+      int dec = tmd_lz4_block_decode(enc_data, ch->len, lz4buf, sizeof(lz4buf));
+      if (dec < 0) {
+        TMD_LOG("TinyMLDelta: LZ4 decode failed idx=%lu\n", (unsigned long)idx);
+        return TMD_STATUS_ERR_HDR;
+      }
+      if (ch->off + (uint32_t)dec > slot_dst->size) {
+        TMD_LOG("TinyMLDelta: chunk out of range (off=%lu,len=%d,size=%lu)\n",
+                (unsigned long)ch->off, dec, (unsigned long)slot_dst->size);
+        return TMD_STATUS_ERR_PARAM;
+      }
+      uint32_t addr = slot_dst->addr + ch->off;
+      TMD_LOG("TinyMLDelta:  chunk[%lu] LZ4 decoded len=%d -> addr=0x%08lx\n",
+              (unsigned long)idx, dec, (unsigned long)addr);
+      if (!P->flash_write(addr, lz4buf, (uint32_t)dec)) {
+        TMD_LOG("TinyMLDelta: flash_write failed @0x%08lx len=%d\n",
+                (unsigned long)addr, dec);
+        return TMD_STATUS_ERR_FLASH;
       }
 #else
       return TMD_STATUS_ERR_UNSUPPORTED;
