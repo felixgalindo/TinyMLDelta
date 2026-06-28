@@ -51,6 +51,15 @@ examples/modelgen/target.tflite
 bench/results/
 bench/*.tflite
 
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+*.info
+cov-html/
+htmlcov/
+covbuild/
+
 # TensorFlow SavedModel staging dirs
 saved_model/
 */saved_model/

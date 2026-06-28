@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+
+jobs:
+  python-tests:
+    name: PatchGen tests + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r tests/requirements.txt
+      - name: pytest with coverage
+        run: |
+          python -m pytest tests/python -q \
+            --cov --cov-config=tests/.coveragerc \
+            --cov-report=term-missing --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: coverage.xml
+
+  c-sanitizers:
+    name: C tests (ASan+UBSan) - ${{ matrix.cc }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { cc: gcc,   cxx: g++ }
+          - { cc: clang, cxx: clang++ }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Build + run under ASan/UBSan
+        env:
+          SAN_C: "-std=c99 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1"
+          SAN_CXX: "-std=c++11 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1"
+        run: |
+          set -e
+          for ex in capability_envelope io_schema; do
+            make -C examples/$ex CC=${{ matrix.cc }} CFLAGS="$SAN_C" test
+            make -C examples/$ex clean
+          done
+          CC=${{ matrix.cc }} CXX=${{ matrix.cxx }} \
+            CFLAGS="$SAN_C" CXXFLAGS="$SAN_CXX" tests/c/run_core_tests.sh
+
+  c-valgrind:
+    name: C tests under valgrind
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Examples + core under valgrind
+        env:
+          RUNNER: "valgrind --error-exitcode=1 --leak-check=full --errors-for-leak-kinds=definite -q"
+        run: |
+          set -e
+          for ex in capability_envelope io_schema; do
+            make -C examples/$ex test     # RUNNER wraps the binary
+            make -C examples/$ex clean
+          done
+          tests/c/run_core_tests.sh
+
+  c-coverage:
+    name: C core coverage (gcov/lcov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: sudo apt-get update && sudo apt-get install -y lcov
+      - name: Run core test with coverage instrumentation
+        env:
+          CFLAGS: "-std=c99 -O0 -g --coverage"
+          CXXFLAGS: "-std=c++11 -O0 -g --coverage"
+          BUILD_DIR: ${{ github.workspace }}/covbuild
+        run: tests/c/run_core_tests.sh
+      - name: Collect core coverage
+        run: |
+          lcov --capture --directory covbuild --output-file coverage.info
+          lcov --extract coverage.info '*/runtime/src/*' --output-file core.info
+          lcov --list core.info
+          genhtml core.info --output-directory cov-html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-core-coverage
+          path: cov-html

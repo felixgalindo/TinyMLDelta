@@ -8,7 +8,7 @@ $(BIN): main.c envelope.c envelope.h
 
 .PHONY: run clean test
 run: $(BIN)
-	./$(BIN)
+	$(RUNNER) ./$(BIN)
 
 # Same as run; non-zero exit on any unexpected decision (CI-friendly).
 test: run
