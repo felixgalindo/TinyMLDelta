@@ -60,6 +60,9 @@ cov-html/
 htmlcov/
 covbuild/
 
+# macOS debug symbol bundles
+*.dSYM/
+
 # TensorFlow SavedModel staging dirs
 saved_model/
 */saved_model/
