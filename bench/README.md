@@ -78,3 +78,11 @@ quantifies the quantization-sensitivity effect and motivates update strategies
 | `patchsize.py` | PatchGen wrapper + gzip/bsdiff/detools baselines |
 | `run_bench.py` | Orchestrator → `results/bench_results.csv` |
 | `to_latex.py` | CSV → LaTeX (booktabs) tables |
+| `backends.py` | Compression-backend comparison (RAW/RLE/LZ4/bsdiff/gzip) + on-device decode feasibility per backend |
+| `formats.py` | Cross-format comparison (flat / ONNX / TFLite): same logical update, patch size per serialization format |
+
+Optional extras for `backends.py` / `formats.py`:
+
+```bash
+.tinyenv/bin/python -m pip install lz4 bsdiff4 onnx   # enable LZ4/bsdiff/ONNX
+```
