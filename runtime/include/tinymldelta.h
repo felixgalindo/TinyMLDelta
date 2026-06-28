@@ -22,6 +22,7 @@ typedef enum {
   TMD_STATUS_ERR_GUARDRAIL,
   TMD_STATUS_ERR_FLASH,
   TMD_STATUS_ERR_UNSUPPORTED,
+  TMD_STATUS_ERR_SIGNATURE,   /**< authenticity check failed / no verifier */
   TMD_STATUS_ERR_INTERNAL
 } tmd_status_t;
 

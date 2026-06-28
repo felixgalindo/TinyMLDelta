@@ -83,12 +83,34 @@ TEMP 32.50 C  score=0.0600  *** ANOMALY ***
 - RAW, RLE, and LZ4 chunk encoding (LZ4 via `--lz4`; device needs `TMD_FEAT_LZ4TINY`)
 - **COPY/ADD structure-aware patches** (`--copy-add`; device needs `TMD_FEAT_COPYADD`)
   — robust to serialization offset shifts and model growth (architecture updates)
+- Base-slot digest verification (`TMD_FEAT_VERIFY_BASE`, default on)
+- **Opt-in patch authenticity** (`TMD_FEAT_VERIFY_SIG`) via a pluggable,
+  crypto-agnostic `verify_patch()` port — see below
+
+## Security
+
+TinyMLDelta separates **integrity** (default: CRC32 + base-slot digest verify)
+from **authenticity** (opt-in). CRC32 is integrity, *not* security — production
+deployments over an untrusted channel should enable signing.
+
+```c
+// firmware build config (tinymldelta_config.h or -D flags)
+#define TMD_FEAT_VERIFY_SIG 1   // require authenticity (fail-closed); 0 = off
+```
+
+When enabled, the core verifies the patch **before** apply via one platform hook
+(`verify_patch()`) and rejects it if missing or invalid. The core stays
+crypto-agnostic, so the same hook plugs in SHA-256 + Ed25519/ECDSA, a secure
+element, or a **SUIT (RFC 9019) + COSE_Sign1 (RFC 9052)** verifier — forward-
+compatible with the IETF standards track. See [docs/security.md](docs/security.md)
+for the threat model and the recommended industry-standard stack.
 
 ## On the roadmap
 
 - **Capability-envelope provisioning** for architecture updates (superset ops,
   arena, slot, schema-flexible I/O) — see [docs/capability-envelope.md](docs/capability-envelope.md)
-- SHA-256 and AES-CMAC signatures
+- Reference Ed25519 / COSE_Sign1 verifier + SUIT manifest wrapping (see [docs/security.md](docs/security.md))
+- SHA-256 digests; AES-CMAC / anti-rollback version
 - Model versioning TLVs
 - Zephyr RTOS port
 - Arduino UNO R4 WiFi port

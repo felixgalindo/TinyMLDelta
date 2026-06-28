@@ -7,14 +7,17 @@ and reproducible locally.
 
 | Path | What |
 |------|------|
-| `python/` | pytest for PatchGen: diff/RLE/chunk-splitting units + roundtrip property tests (patch → apply → equals target) |
-| `python/applier.py` | pure-Python reference applier used as the roundtrip oracle |
+| `python/` | pytest for PatchGen: diff/RLE/chunk-splitting units, atomic-write, **LZ4** + **COPY/ADD** + **ONNX** roundtrips (patch → apply → equals target) |
+| `python/applier.py` | pure-Python reference applier (oracle): positional + RLE + LZ4 + COPY/ADD |
+| `c/unit_tests.c` | **per-function C unit tests** (statics via `#include` of the core): `tmd_rle_decoded_len`, `tmd_rle_decode_write`, `tmd_lz4_block_decode`, `tmd_check_guardrails`, `tmd_verify_sig` |
 | `c/core_apply_harness.cpp` | applies a `.tmd` via the **real C core** (in-memory flash port) |
-| `c/run_core_tests.sh` | drives the core over identical / scattered / growth / shrink / RLE / >64 KB cases, asserting byte-exact reconstruction |
+| `c/run_core_tests.sh` | drives the core byte-exact over identical / scattered / growth / shrink / RLE / >64 KB / **copyadd** / **lz4** cases, plus a **wrongbase** rejection (base-digest) negative test |
 | `run_all.sh` | runs everything CI runs (minus valgrind, which is Linux-only) |
 
 The two `examples/*/` reference implementations also self-test (their `make test`
 exits non-zero on any unexpected result) and are run in CI.
+
+Coverage: 24 pytest + 17 C unit + 10 C integration cases + 2 example self-tests.
 
 ## Run locally
 

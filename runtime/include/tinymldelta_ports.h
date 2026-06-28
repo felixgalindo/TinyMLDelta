@@ -130,6 +130,16 @@ typedef struct {
       /**< Optional: AES-CMAC for secure model update signing. */
 #endif
 
+#if TMD_FEAT_VERIFY_SIG
+  bool (*verify_patch)(const uint8_t* patch, size_t patch_len);
+      /**< Verify patch AUTHENTICITY before apply. Returns true if the patch is
+           from a trusted publisher. The core is crypto-agnostic: the platform
+           implements the scheme — SHA-256 + Ed25519/ECDSA, a secure element, or
+           a SUIT (RFC 9019) manifest + COSE_Sign1 (RFC 9052) verifier — and
+           locates the signature/key itself (forward-compatible with the IETF
+           SUIT/COSE standards track). Required when TMD_FEAT_VERIFY_SIG=1. */
+#endif
+
   /* -------------------- Slot switching -------------------- */
   uint8_t (*get_active_slot)(void);
       /**< Return current active model slot: 0 = A, 1 = B. */

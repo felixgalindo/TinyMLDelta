@@ -86,6 +86,16 @@
 #define TMD_FEAT_VERIFY_BASE  1
 #endif
 
+/* Cryptographic patch-authenticity verification (signature). When enabled, the
+ * core REQUIRES the platform to provide a verify_patch() port and rejects the
+ * patch if it is missing or verification fails (fail-closed). The core stays
+ * crypto-agnostic: the platform implements the actual scheme (e.g. SHA-256 +
+ * Ed25519/ECDSA, or a secure element / SUIT+COSE verifier). Opt-in: products
+ * that need authenticity enable this; integrity-only builds leave it off. */
+#ifndef TMD_FEAT_VERIFY_SIG
+#define TMD_FEAT_VERIFY_SIG   0
+#endif
+
 /* --------------------------------------------------------------------------
  *  Flash & Buffer Geometry
  * --------------------------------------------------------------------------

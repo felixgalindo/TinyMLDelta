@@ -10,6 +10,7 @@
  */
 #define TMD_FEAT_LZ4TINY        1
 #define TMD_FEAT_COPYADD        1
+#define TMD_FEAT_VERIFY_SIG     1
 #define TMD_FIRMWARE_OPSET_HASH 0x1234abcdu
 #define TMD_ENFORCE_IO_HASH     1
 #define TMD_FIRMWARE_IO_HASH    0xdeadbeefu
@@ -108,6 +109,23 @@ static void test_guardrails(void) {
   CHECK(tmd_check_guardrails(&m) == TMD_STATUS_ERR_GUARDRAIL, "guard io mismatch");
 }
 
+static bool verify_accept(const uint8_t* p, size_t n) { (void)p; (void)n; return true; }
+static bool verify_reject(const uint8_t* p, size_t n) { (void)p; (void)n; return false; }
+
+static void test_verify_sig(void) {
+  tmd_ports_t P;
+  uint8_t dummy[4] = {0};
+  memset(&P, 0, sizeof(P));               /* no verifier -> fail-closed */
+  CHECK(tmd_verify_sig(&P, dummy, 4) == TMD_STATUS_ERR_SIGNATURE,
+        "verify_sig no-verifier rejects (fail-closed)");
+  P.verify_patch = verify_reject;
+  CHECK(tmd_verify_sig(&P, dummy, 4) == TMD_STATUS_ERR_SIGNATURE,
+        "verify_sig reject");
+  P.verify_patch = verify_accept;
+  CHECK(tmd_verify_sig(&P, dummy, 4) == TMD_STATUS_OK,
+        "verify_sig accept");
+}
+
 int main(void) {
   test_rle_decoded_len();
   test_rle_decode_write();
@@ -115,6 +133,7 @@ int main(void) {
   test_lz4_match();
   test_lz4_overflow_rejected();
   test_guardrails();
+  test_verify_sig();
   printf("\nC unit tests: %d passed, %d failed\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

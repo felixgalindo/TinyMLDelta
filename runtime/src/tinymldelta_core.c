@@ -377,6 +377,29 @@ static tmd_status_t tmd_check_guardrails(const tmd_meta_state_t* meta) {
   return TMD_STATUS_OK;
 }
 
+#if TMD_FEAT_VERIFY_SIG
+/**
+ * @brief Verify patch authenticity via the platform verifier (fail-closed).
+ *
+ * The core is crypto-agnostic — the platform's verify_patch() implements the
+ * scheme (SHA-256 + Ed25519/ECDSA, secure element, or SUIT+COSE). If no
+ * verifier is configured, the patch is rejected.
+ */
+static tmd_status_t tmd_verify_sig(const tmd_ports_t* P,
+                                   const uint8_t* patch, size_t patch_len) {
+  if (!P->verify_patch) {
+    TMD_LOG("TinyMLDelta: VERIFY_SIG enabled but no verify_patch port\n");
+    return TMD_STATUS_ERR_SIGNATURE;
+  }
+  if (!P->verify_patch(patch, patch_len)) {
+    TMD_LOG("TinyMLDelta: patch authenticity verification FAILED\n");
+    return TMD_STATUS_ERR_SIGNATURE;
+  }
+  TMD_LOG("TinyMLDelta: patch authenticity OK\n");
+  return TMD_STATUS_OK;
+}
+#endif
+
 /**
  * @brief Copy an entire slot from src to dst using the ports interface.
  *
@@ -486,6 +509,15 @@ tmd_status_t tmd_apply_patch_from_memory(const uint8_t* patch, size_t patch_len)
             (unsigned)hdr->v);
     return TMD_STATUS_ERR_HDR;
   }
+
+#if TMD_FEAT_VERIFY_SIG
+  /* Authenticity FIRST — reject unsigned/forged patches before trusting any
+   * header/metadata content or touching flash. */
+  {
+    tmd_status_t sst = tmd_verify_sig(P, patch, patch_len);
+    if (sst != TMD_STATUS_OK) return sst;
+  }
+#endif
 
 #if TMD_USE_CRC32
   if (hdr->algo != 1) {
