@@ -1,0 +1,11 @@
+payload,backend,bytes,ratio_pct,on_mcu
+sparse_weight_diff,raw,3571,5.95,yes
+sparse_weight_diff,rle,3571,5.95,yes
+sparse_weight_diff,lz4,3586,5.98,yes
+sparse_weight_diff,bsdiff,3240,5.40,no
+sparse_weight_diff,gzip_full,60038,100.06,yes
+repetitive_quant_like,raw,30000,50.00,yes
+repetitive_quant_like,rle,236,0.39,yes
+repetitive_quant_like,lz4,128,0.21,yes
+repetitive_quant_like,bsdiff,20641,34.40,no
+repetitive_quant_like,gzip_full,30208,50.35,yes

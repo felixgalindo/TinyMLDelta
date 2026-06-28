@@ -59,6 +59,48 @@ The harness always reports gzip-of-full-model. For bsdiff / detools comparison:
 
 They are picked up automatically if importable; otherwise those columns show `---`.
 
+## Sample results
+
+These are **deterministic** (seeded, no training) and reproducible with the
+commands shown — a snapshot lives in [`sample_results.csv`](sample_results.csv).
+
+### Compression backend vs. update type (`backends.py`)
+
+The best backend depends on the *kind* of change — and bsdiff, while smallest, is
+**not MCU-deployable** (O(n) RAM). On a 60 KB blob:
+
+| Update payload | raw | rle | lz4 | bsdiff | gzip(full) |
+|----------------|-----|-----|-----|--------|------------|
+| sparse weight diff (~2%, high-entropy) | 5.95% | 5.95% | 5.98% | 5.40%¹ | 100.06% |
+| repetitive / quant-like (low-entropy)  | 50.0% | **0.39%** | **0.21%** | 34.40%¹ | 50.35% |
+
+¹ bsdiff = size reference only, **not on-device** (O(n) RAM). raw/rle/lz4 are deployable.
+
+→ RLE/LZ4 dominate on repetitive (quant-churn) changes; on high-entropy weight
+diffs no codec helps much. *Backend winner is a function of the update.*
+
+### Same logical update across model formats (`formats.py`)
+
+TinyMLDelta is format-agnostic; byte-diff behaviour depends on the container:
+
+| Format | Update | Target | `.tmd` | Ratio |
+|--------|--------|--------|--------|-------|
+| flat (GGUF-like) | weight | 740 B | 96 B | 13.0% |
+| flat | grow | 1008 B | 373 B | 37.0% |
+| ONNX (protobuf) | weight | 864 B | 96 B | 11.1% |
+| ONNX | grow | 1137 B | 427 B | 37.6% |
+
+(Tiny demo models → overhead-dominated; larger models amortize it.)
+
+```bash
+.tinyenv/bin/python bench/formats.py                       # cross-format table
+.tinyenv/bin/python bench/run_bench.py --quant int8        # model scenarios -> CSV
+```
+
+> Full model-scenario numbers (S1–S4 across trained models) require a real
+> training run; `bench/results/` is git-ignored (generated). The tables above
+> need no training and reproduce exactly.
+
 ## Key finding to expect
 
 For **int8** deployed models the patch ratio is dominated by **quantization
