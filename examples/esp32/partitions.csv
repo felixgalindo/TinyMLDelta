@@ -1,0 +1,8 @@
+# ESP-IDF partition table for the TinyMLDelta ESP32 port.
+# tmd_models holds A/B model slots + journal (>= 2*SLOT + 4 KiB; 0x84000 = 528 KiB
+# fits two 256 KiB slots + a 4 KiB journal, sector-aligned).
+# Name,       Type, SubType,  Offset,   Size,    Flags
+nvs,          data, nvs,      0x9000,   0x6000,
+phy_init,     data, phy,      0xf000,   0x1000,
+factory,      app,  factory,  0x10000,  0x100000,
+tmd_models,   data, 0x40,     ,         0x84000,

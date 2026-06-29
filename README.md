@@ -123,7 +123,7 @@ for the threat model and the recommended industry-standard stack.
 - Model versioning TLVs
 - Zephyr RTOS port
 - Arduino UNO R4 WiFi port
-- ESP32 / Tachyon ports
+- ESP32 reference port added ([`examples/esp32/`](examples/esp32/)) — needs on-hardware validation; Tachyon port next
 
 ---
 
