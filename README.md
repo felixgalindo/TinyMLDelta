@@ -88,6 +88,7 @@ update type, and bsdiff is smallest but **not MCU-deployable**.
 - A/B slot atomic updates
 - Crash-safe journaling (power-loss recovery)
 - Arduino UNO Q (STM32U585 + Zephyr)
+- STM32L4 bare-metal port, tested on a SensorTile (STM32L476JG), in [`examples/stm32l4_sensortile/`](examples/stm32l4_sensortile/README.md)
 - Edge Impulse SDK integration (external model loading)
 - RAW, RLE, and LZ4 chunk encoding (LZ4 via `--lz4`; device needs `TMD_FEAT_LZ4TINY`)
 - **COPY/ADD structure-aware patches** (`--copy-add`; device needs `TMD_FEAT_COPYADD`)
@@ -216,6 +217,7 @@ python3 run_demo.py        # train → update → infer
 |---------|----------|---------------|
 | [`examples/posix/`](examples/posix/README.md) | macOS / Linux | Full update flow, no hardware. Model gen → patch → simulated flash → verify. |
 | [`examples/UnoQ_TinyMLDeltaDemo/`](examples/UnoQ_TinyMLDeltaDemo/README.md) | Arduino UNO Q | Live temperature anomaly demo. Two variants: TFLite C API and Edge Impulse SDK. Train → patch → infer. |
+| [`examples/stm32l4_sensortile/`](examples/stm32l4_sensortile/README.md) | STM32L4 (SensorTile) | Applies patches in the chip's own flash, using a RAM copy of one 2 KiB page, A/B slots and a journal. The host writes the patch over SWD and compares the result byte for byte. |
 | [`examples/modelgen/`](examples/modelgen/README.md) | PC | Standalone TFLite model generator used by the POSIX demo. |
 
 ---
@@ -301,6 +303,12 @@ TinyMLDelta/
 │   │   ├── flash_layout.h           Simulated A/B flash geometry
 │   │   ├── make_flash.py            Build flash.bin with A/B slots
 │   │   └── verify_flash.py          Confirm target model in flash after update
+│   │
+│   ├── stm32l4_sensortile/          STM32L4 bare-metal port (SensorTile), tested on hardware
+│   │   ├── src/tmd_port_stm32l4.c   Flash port: page cache, address check, journal, slot marker
+│   │   ├── src/main.c               Boot, find the staged patch, apply it, report
+│   │   ├── tools/tmd_host.py        Provision / stage / run / verify over SWD
+│   │   └── README.md
 │   │
 │   ├── modelgen/
 │   │   ├── make_models.py           Generate base.tflite + target.tflite for demos
